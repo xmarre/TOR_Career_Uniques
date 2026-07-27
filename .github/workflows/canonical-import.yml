@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/canonical-import
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -100,6 +103,7 @@ jobs:
         run: ./scripts/package.ps1 -Version 1.7.29 -Configuration Release
 
       - name: Replace main with canonical history
+        if: github.event_name == 'push'
         shell: pwsh
         working-directory: ${{ env.CANONICAL_ROOT }}
         env:
