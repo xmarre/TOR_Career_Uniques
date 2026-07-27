@@ -1,0 +1,116 @@
+name: Canonical repository repair
+
+on:
+  push:
+    branches:
+      - agent/canonical-import
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-replace-main:
+    runs-on: windows-latest
+    steps:
+      - name: Check out transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct canonical source tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = @(
+            'bootstrap2/part.000',
+            'bootstrap2/part.001',
+            'bootstrap2/part.002',
+            'bootstrap2/tail.000',
+            'bootstrap2/tail.001',
+            'bootstrap2/tail.002',
+            'bootstrap2/tail.003',
+            'bootstrap2/tail.004',
+            'bootstrap2/tail.005'
+          )
+
+          foreach ($part in $parts) {
+            if (-not (Test-Path -LiteralPath $part -PathType Leaf)) {
+              throw "Missing transport part: $part"
+            }
+          }
+
+          $encoded = ($parts | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join ''
+          $archive = Join-Path $env:RUNNER_TEMP 'torcu-canonical.tar.xz'
+          [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($encoded))
+
+          $expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Canonical archive SHA-256 mismatch. Expected $expected, got $actual"
+          }
+
+          $canonical = Join-Path $env:RUNNER_TEMP 'torcu-canonical'
+          Remove-Item -LiteralPath $canonical -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $canonical | Out-Null
+          & tar -xJf $archive -C $canonical
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract canonical source archive."
+          }
+          "CANONICAL_ROOT=$canonical" >> $env:GITHUB_ENV
+
+      - name: Reject cleanup debris
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $forbidden = Get-ChildItem -LiteralPath $env:CANONICAL_ROOT -Recurse -Force -File | Where-Object {
+            $_.Name -match '(?i)(validation|investigation|patch_evidence|runtime_compatibility_fix|\.pdb$|\.log$)' -or
+            $_.FullName -match '(?i)[\\/](bootstrap|bootstrap2)[\\/]'
+          }
+          if ($forbidden) {
+            $forbidden.FullName | ForEach-Object { Write-Error "Forbidden cleanup debris: $_" }
+            throw 'Canonical source still contains cleanup debris.'
+          }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: ${{ env.CANONICAL_ROOT }}/Directory.Packages.props
+
+      - name: Verify source manifest
+        shell: pwsh
+        working-directory: ${{ env.CANONICAL_ROOT }}
+        run: ./scripts/verify-source.ps1
+
+      - name: Restore
+        shell: pwsh
+        working-directory: ${{ env.CANONICAL_ROOT }}
+        run: dotnet restore ./TORCareerUniques.sln
+
+      - name: Build
+        shell: pwsh
+        working-directory: ${{ env.CANONICAL_ROOT }}
+        run: dotnet build ./TORCareerUniques.sln -c Release --no-restore
+
+      - name: Package
+        shell: pwsh
+        working-directory: ${{ env.CANONICAL_ROOT }}
+        run: ./scripts/package.ps1 -Version 1.7.29 -Configuration Release
+
+      - name: Replace main with canonical history
+        shell: pwsh
+        working-directory: ${{ env.CANONICAL_ROOT }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Establish v1.7.29 development baseline'
+          git branch -M main
+          git remote add origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
+          git push --force origin main
