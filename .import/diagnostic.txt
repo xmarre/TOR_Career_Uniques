@@ -1,0 +1,2 @@
+phase=decode
+The normalized canonical transport is not valid base64.
