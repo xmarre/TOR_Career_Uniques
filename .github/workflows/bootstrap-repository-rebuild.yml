@@ -13,61 +13,109 @@ jobs:
   analyze:
     if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Locate surviving transport anchors
+      - name: Localize first missing base64 character
         shell: bash
         run: |
           set -euo pipefail
           rm -f .import/diagnostic.txt
           python3 - <<'PY' > .import/diagnostic.txt
-          import glob, pathlib, string
-          allowed = set(string.ascii_letters + string.digits + '+/=')
-          def clean_file(name):
+          import base64, glob, heapq, lzma, pathlib, string
+
+          alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
+          allowed = set(alphabet + '=')
+
+          def clean(name):
               raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
               return ''.join(ch for ch in raw if ch in allowed)
-          def combine(patterns):
-              names=[]
-              for pattern in patterns:
-                  names.extend(sorted(glob.glob(pattern)))
-              return ''.join(clean_file(name) for name in names), names
-          bootstrap, bootstrap_names = combine(['bootstrap2/part.*','bootstrap2/tail.*'])
-          print('phase=anchors')
-          print(f'bootstrap2 length={len(bootstrap)}')
-          for label, patterns in [('source',['bootstrap/source.part.*']),('segments',['bootstrap/seg.*']),('minimal',['bootstrap/min.part.*'])]:
-              joined, names = combine(patterns)
-              prefix=0
-              for a,b in zip(joined,bootstrap):
-                  if a != b: break
-                  prefix += 1
-              print(f'{label}: length={len(joined)} exact_at={bootstrap.find(joined)} common_prefix={prefix}')
-              for name in names:
-                  piece=clean_file(name)
-                  print(f'  {name}: length={len(piece)} exact_at={bootstrap.find(piece)}')
-                  positions=sorted(set([0,max(0,len(piece)//4-32),max(0,len(piece)//2-32),max(0,3*len(piece)//4-32),max(0,len(piece)-64)]))
-                  for pos in positions:
-                      seed=piece[pos:pos+64]
-                      hits=[]
-                      start=0
-                      while seed and len(hits)<8:
-                          found=bootstrap.find(seed,start)
-                          if found<0: break
-                          hits.append(found)
-                          start=found+1
-                      print(f'    anchor piece={pos} bootstrap_hits={hits}')
-          total=0
-          print('bootstrap2 boundaries:')
-          for name in bootstrap_names:
-              piece=clean_file(name)
-              print(f'  {name} {total}..{total+len(piece)}')
-              total += len(piece)
+
+          names = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
+          pieces = [(name, clean(name)) for name in names]
+          joined = ''.join(piece for _, piece in pieces)
+
+          boundaries = {}
+          offset = 0
+          for name, piece in pieces:
+              boundaries[name] = (offset, offset + len(piece))
+              offset += len(piece)
+
+          def decode_lenient(text):
+              core = text.rstrip('=')
+              core += 'A' * ((-len(core)) % 4)
+              return base64.b64decode(core, validate=True)
+
+          def score(text, block=256):
+              try:
+                  data = decode_lenient(text)
+              except Exception:
+                  return -1
+              decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+              pos = 0
+              try:
+                  while pos < len(data):
+                      end = min(pos + block, len(data))
+                      decoder.decompress(data[pos:end])
+                      pos = end
+                      if decoder.eof:
+                          return len(data) + 10_000_000
+              except lzma.LZMAError:
+                  return pos
+              return len(data)
+
+          baseline = score(joined, block=16)
+          center = baseline * 4 // 3
+          lo_bound, hi_bound = boundaries['bootstrap2/tail.001']
+          coarse_lo = max(lo_bound, center - 2048)
+          coarse_hi = min(hi_bound, center + 192)
+
+          print('phase=first-missing-character')
+          print(f'joined_length={len(joined)} baseline_input_score={baseline} mapped_base64_center={center}')
+          print(f'tail001_boundary={lo_bound}..{hi_bound} search={coarse_lo}..{coarse_hi}')
+
+          heap = []
+          for position in range(coarse_lo, coarse_hi + 1, 4):
+              for char in alphabet:
+                  candidate = joined[:position] + char + joined[position:]
+                  value = score(candidate, block=256)
+                  item = (value, position, char)
+                  if len(heap) < 24:
+                      heapq.heappush(heap, item)
+                  elif item > heap[0]:
+                      heapq.heapreplace(heap, item)
+
+          coarse = sorted(heap, reverse=True)
+          print('coarse_top:')
+          for value, position, char in coarse:
+              print(f'  score={value} position={position} char={char}')
+
+          refine_positions = set()
+          for _, position, _ in coarse[:12]:
+              for p in range(max(lo_bound, position - 8), min(hi_bound, position + 8) + 1):
+                  refine_positions.add(p)
+
+          heap = []
+          for position in sorted(refine_positions):
+              for char in alphabet:
+                  candidate = joined[:position] + char + joined[position:]
+                  value = score(candidate, block=32)
+                  item = (value, position, char)
+                  if len(heap) < 40:
+                      heapq.heappush(heap, item)
+                  elif item > heap[0]:
+                      heapq.heapreplace(heap, item)
+
+          print('refined_top:')
+          for value, position, char in sorted(heap, reverse=True):
+              print(f'  score={value} position={position} char={char}')
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .import/diagnostic.txt
-          git commit -m 'Record fast transport anchor analysis'
+          git commit -m 'Record first transport corruption localization'
           git push origin HEAD:repo-rebuild-v1.7.29
           exit 1
