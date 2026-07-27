@@ -41,67 +41,57 @@ jobs:
             git push origin HEAD:repo-rebuild-v1.7.29
             exit 1
           }
-          if ! python3 - <<'PY' >/tmp/repair-output.txt 2>&1
-          import base64, binascii, glob, hashlib, lzma, pathlib, string
-          alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
-          allowed = set(alphabet + '=')
-          def clean(name):
-              raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
-              return ''.join(ch for ch in raw if ch in allowed)
-          prefix_names = sorted(glob.glob('bootstrap2/part.*')) + ['bootstrap2/tail.000', 'bootstrap2/tail.001']
-          middle_names = ['bootstrap2/tail.002', 'bootstrap2/tail.003', 'bootstrap2/tail.004']
-          prefix = ''.join(clean(name) for name in prefix_names)
-          middle = ''.join(clean(name) for name in middle_names)
-          tail = clean('bootstrap2/tail.005')
-          if len(prefix) % 4 != 3 or len(middle) % 4 != 0 or len(tail) % 4 != 2 or not tail.endswith('=='):
-              raise RuntimeError(f'unexpected boundary shape: prefix={len(prefix)%4}, middle={len(middle)%4}, tail={len(tail)%4}, tail_padding={tail[-2:]}')
-          prefix_candidates = []
-          for missing in alphabet:
-              text = prefix + missing + middle
-              try:
-                  data = base64.b64decode(text, validate=True)
-                  decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-                  decoder.decompress(data)
-              except (binascii.Error, lzma.LZMAError):
-                  continue
-              prefix_candidates.append((missing, data))
-          print('prefix_candidates=' + ''.join(item[0] for item in prefix_candidates))
-          if not prefix_candidates:
-              raise RuntimeError('no middle-boundary character survived incremental XZ decompression')
-          tail_candidates = []
-          for first in alphabet:
-              for second in alphabet:
-                  text = first + second + tail
+          if ! python3 - <<'PY' >/tmp/transport-output.txt 2>&1
+          import base64, binascii, glob, hashlib, io, lzma, pathlib, string, tarfile
+          alphabet = set(string.ascii_letters + string.digits + '+/=')
+          sets = [
+              ('source', sorted(glob.glob('bootstrap/source.part.*'))),
+              ('segments', sorted(glob.glob('bootstrap/seg.*'))),
+              ('minimal', sorted(glob.glob('bootstrap/min.part.*'))),
+              ('bootstrap2', sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))),
+          ]
+          diagnostics = []
+          valid = []
+          for label, names in sets:
+              pieces = []
+              for name in names:
+                  raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
+                  clean = ''.join(ch for ch in raw if ch in alphabet)
+                  pieces.append(clean)
+              diagnostics.append(f'{label}: files={len(names)} lengths={[len(p) for p in pieces]} mods={[len(p)%4 for p in pieces]}')
+              methods = {}
+              methods['joined'] = lambda p=pieces: base64.b64decode(''.join(p), validate=True)
+              def decode_independent(p=pieces):
+                  return b''.join(base64.b64decode(item, validate=True) for item in p)
+              methods['independent'] = decode_independent
+              for method, loader in methods.items():
                   try:
-                      data = base64.b64decode(text, validate=True)
-                  except binascii.Error:
-                      continue
-                  tail_candidates.append((first, second, data))
-          repaired = []
-          attempts = 0
-          for middle_char, prefix_bytes in prefix_candidates:
-              for first, second, tail_bytes in tail_candidates:
-                  attempts += 1
-                  payload = prefix_bytes + tail_bytes
-                  try:
+                      payload = loader()
                       lzma.decompress(payload, format=lzma.FORMAT_XZ)
-                  except lzma.LZMAError:
-                      continue
-                  repaired.append((middle_char, first, second, payload))
-          print(f'full_attempts={attempts}')
-          if len(repaired) != 1:
-              raise RuntimeError(f'expected one XZ-valid boundary repair, found {len(repaired)}')
-          middle_char, first, second, payload = repaired[0]
+                      with tarfile.open(fileobj=io.BytesIO(payload), mode='r:xz') as archive:
+                          names_in_archive = archive.getnames()
+                      if not any(name.endswith('TORCareerUniques.sln') for name in names_in_archive):
+                          diagnostics.append(f'{label}/{method}: valid XZ but solution missing')
+                          continue
+                      valid.append((label, method, payload))
+                      diagnostics.append(f'{label}/{method}: VALID sha256={hashlib.sha256(payload).hexdigest()} bytes={len(payload)}')
+                  except Exception as exc:
+                      diagnostics.append(f'{label}/{method}: {type(exc).__name__}: {exc}')
+          print('\n'.join(diagnostics))
+          unique = {}
+          for label, method, payload in valid:
+              unique.setdefault(hashlib.sha256(payload).hexdigest(), (label, method, payload))
+          if len(unique) != 1:
+              raise RuntimeError(f'expected one unique valid source archive, found {len(unique)}')
+          digest, (label, method, payload) = next(iter(unique.items()))
           pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
-          print(f'repaired_missing_chars={middle_char}|{first}{second}')
-          print(f'archive_bytes={len(payload)}')
-          print(f'archive_sha256={hashlib.sha256(payload).hexdigest()}')
+          print(f'selected={label}/{method} sha256={digest}')
           PY
           then
-            fail_import repair "$(cat /tmp/repair-output.txt)"
+            fail_import transport "$(cat /tmp/transport-output.txt)"
           fi
           if ! xz --test /tmp/TORCareerUniques-source.tar.xz 2>/tmp/xz-error.txt; then
-            fail_import xz "$(cat /tmp/xz-error.txt)" "$(cat /tmp/repair-output.txt)"
+            fail_import xz "$(cat /tmp/xz-error.txt)" "$(cat /tmp/transport-output.txt)"
           fi
           rm -rf /tmp/torcu-unpack
           mkdir -p /tmp/torcu-unpack
@@ -121,7 +111,7 @@ jobs:
           install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
           install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
           if ! pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1" >/tmp/verify-output.txt 2>&1; then
-            fail_import manifest "$(tail -200 /tmp/verify-output.txt)" "$(cat /tmp/repair-output.txt)"
+            fail_import manifest "$(tail -200 /tmp/verify-output.txt)" "$(cat /tmp/transport-output.txt)"
           fi
           forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) | sort | head -200)
           if [ -n "$forbidden" ]; then
