@@ -1,0 +1,17 @@
+phase=decode
+bootstrap2/part.000: raw=9000 clean=9000 mod4=0 equals=[] prefix=/Td6WFoAAATm suffix=ifo4kx4x3fR8
+bootstrap2/part.001: raw=9000 clean=9000 mod4=0 equals=[] prefix=adhoXFspbP/c suffix=GkBCS8HuluBm
+bootstrap2/part.002: raw=9000 clean=9000 mod4=0 equals=[] prefix=2m7V8/h4GWe0 suffix=eRElqRoXli78
+bootstrap2/tail.000: raw=9000 clean=9000 mod4=0 equals=[] prefix=GqtD5r5Stk2s suffix=bDBsSJdLhp+h
+bootstrap2/tail.001: raw=17999 clean=17999 mod4=3 equals=[] prefix=oZE/4JloaYBy suffix=O6RRCAtGFybI
+bootstrap2/tail.002: raw=18000 clean=18000 mod4=0 equals=[] prefix=zVK4OhgO+a+i suffix=fQMitgrZP+5A
+bootstrap2/tail.003: raw=18000 clean=18000 mod4=0 equals=[] prefix=e4en71jvdnHQ suffix=rMuCfvJYehNZ
+bootstrap2/tail.004: raw=18000 clean=18000 mod4=0 equals=[] prefix=N27T72EhLm30 suffix=nHS+r8AylC9A
+bootstrap2/tail.005: raw=43094 clean=43094 mod4=2 equals=[43092, 43093] prefix=LZI4xj/m44ET suffix=xPPPyj+HQA==
+joined: length=151093 mod4=1 equals_count=2 equals_first=[151091, 151092] equals_last=[151091, 151092]
+Traceback (most recent call last):
+  File "<stdin>", line 14, in <module>
+  File "/usr/lib/python3.12/base64.py", line 88, in b64decode
+    return binascii.a2b_base64(s, strict_mode=validate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+binascii.Error: Excess data after padding
