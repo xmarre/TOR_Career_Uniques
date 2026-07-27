@@ -19,9 +19,10 @@ jobs:
       - name: Check out transport branch
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          show-progress: false
 
-      - name: Reconstruct canonical source tree
+      - name: Assemble canonical archive
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -36,31 +37,37 @@ jobs:
             'bootstrap2/tail.004',
             'bootstrap2/tail.005'
           )
-
           foreach ($part in $parts) {
             if (-not (Test-Path -LiteralPath $part -PathType Leaf)) {
               throw "Missing transport part: $part"
             }
           }
-
           $encoded = ($parts | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join ''
           $archive = Join-Path $env:RUNNER_TEMP 'torcu-canonical.tar.xz'
           [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($encoded))
+          $canonical = Join-Path $env:RUNNER_TEMP 'torcu-canonical'
+          "CANONICAL_ARCHIVE=$archive" >> $env:GITHUB_ENV
+          "CANONICAL_ROOT=$canonical" >> $env:GITHUB_ENV
 
+      - name: Verify canonical archive hash
+        shell: pwsh
+        run: |
           $expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
-          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath $env:CANONICAL_ARCHIVE -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) {
             throw "Canonical archive SHA-256 mismatch. Expected $expected, got $actual"
           }
 
-          $canonical = Join-Path $env:RUNNER_TEMP 'torcu-canonical'
-          Remove-Item -LiteralPath $canonical -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $canonical | Out-Null
-          & tar -xJf $archive -C $canonical
+      - name: Extract canonical source tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath $env:CANONICAL_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $env:CANONICAL_ROOT | Out-Null
+          & tar -xJf $env:CANONICAL_ARCHIVE -C $env:CANONICAL_ROOT
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to extract canonical source archive."
+            throw 'Failed to extract canonical source archive.'
           }
-          "CANONICAL_ROOT=$canonical" >> $env:GITHUB_ENV
 
       - name: Reject cleanup debris
         shell: pwsh
