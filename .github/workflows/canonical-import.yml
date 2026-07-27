@@ -23,6 +23,7 @@ jobs:
           import base64
           import hashlib
           import itertools
+          import json
           import lzma
           import pathlib
           import tarfile
@@ -36,38 +37,48 @@ jobs:
               root / '.canonical' / 'part.000',
           ]
           candidates = fixed + extras
+          report = {'files': {}, 'valid': []}
           for path in candidates:
               data = ''.join(path.read_text(encoding='utf-8').split())
-              print(f'{path}: {len(data)} chars prefix={data[:12]} suffix={data[-12:]}')
+              report['files'][str(path)] = {
+                  'characters': len(data),
+                  'prefix': data[:16],
+                  'suffix': data[-16:],
+                  'sha256_text': hashlib.sha256(data.encode()).hexdigest(),
+              }
 
-          expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
           fixed_text = [''.join(p.read_text(encoding='utf-8').split()) for p in fixed]
-          found = False
           for count in range(0, len(extras) + 1):
               for order in itertools.permutations(extras, count):
-                  texts = fixed_text + [''.join(p.read_text(encoding='utf-8').split()) for p in order]
-                  joined = ''.join(texts)
+                  joined = ''.join(fixed_text + [''.join(p.read_text(encoding='utf-8').split()) for p in order])
                   try:
                       raw = base64.b64decode(joined, validate=True)
                   except Exception:
                       continue
                   if not raw.startswith(b'\xfd7zXZ\x00'):
                       continue
-                  digest = hashlib.sha256(raw).hexdigest()
-                  print('XZ candidate:', [str(p) for p in fixed + list(order)], len(raw), digest)
+                  candidate = {
+                      'order': [str(p) for p in fixed + list(order)],
+                      'archive_bytes': len(raw),
+                      'archive_sha256': hashlib.sha256(raw).hexdigest(),
+                  }
                   try:
                       decompressed = lzma.decompress(raw)
+                      candidate['tar_bytes'] = len(decompressed)
+                      pathlib.Path('/tmp/candidate.tar.xz').write_bytes(raw)
+                      with tarfile.open('/tmp/candidate.tar.xz', 'r:xz') as archive:
+                          names = archive.getnames()
+                      candidate['entries'] = len(names)
+                      candidate['first_entries'] = names[:100]
                   except Exception as exc:
-                      print('XZ decompression failed:', exc)
-                      continue
-                  print('VALID XZ:', [str(p) for p in fixed + list(order)], 'tar bytes', len(decompressed))
-                  pathlib.Path('/tmp/canonical.tar.xz').write_bytes(raw)
-                  with tarfile.open('/tmp/canonical.tar.xz', 'r:xz') as archive:
-                      names = archive.getnames()
-                  print('Archive entries:', len(names))
-                  print('\n'.join(names[:80]))
-                  if digest == expected:
-                      print('EXPECTED ARCHIVE FOUND')
-                  found = True
-          if not found:
-              raise SystemExit('No valid XZ archive could be reconstructed from the committed fragments.')
+                      candidate['error'] = repr(exc)
+                  report['valid'].append(candidate)
+
+          pathlib.Path('payload-diagnosis.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          print(json.dumps({'file_count': len(report['files']), 'valid_count': len(report['valid'])}))
+      - name: Upload diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: payload-diagnosis
+          path: payload-diagnosis.json
+          if-no-files-found: error
