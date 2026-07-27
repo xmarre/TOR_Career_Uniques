@@ -10,124 +10,62 @@ permissions:
   pull-requests: read
 
 jobs:
-  rebuild:
+  analyze:
     if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout reconstruction branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Reconstruct and verify canonical tree
-        shell: bash
-        run: |
-          set -u
-          if [ -f .import/diagnostic.txt ]; then
-            cat .import/diagnostic.txt
-            exit 1
-          fi
-          fail_import() {
-            status="$1"
-            shift
-            {
-              echo "phase=$status"
-              printf '%s\n' "$@"
-            } > .import/diagnostic.txt
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add .import/diagnostic.txt
-            git commit -m "Record canonical import failure: $status"
-            git push origin HEAD:repo-rebuild-v1.7.29
-            exit 1
-          }
-          if ! python3 - <<'PY' >/tmp/transport-output.txt 2>&1
-          import base64, binascii, glob, hashlib, io, lzma, pathlib, string, tarfile
-          alphabet = set(string.ascii_letters + string.digits + '+/=')
-          sets = [
-              ('source', sorted(glob.glob('bootstrap/source.part.*'))),
-              ('segments', sorted(glob.glob('bootstrap/seg.*'))),
-              ('minimal', sorted(glob.glob('bootstrap/min.part.*'))),
-              ('bootstrap2', sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))),
-          ]
-          diagnostics = []
-          valid = []
-          for label, names in sets:
-              pieces = []
-              for name in names:
-                  raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
-                  clean = ''.join(ch for ch in raw if ch in alphabet)
-                  pieces.append(clean)
-              diagnostics.append(f'{label}: files={len(names)} lengths={[len(p) for p in pieces]} mods={[len(p)%4 for p in pieces]}')
-              methods = {}
-              methods['joined'] = lambda p=pieces: base64.b64decode(''.join(p), validate=True)
-              def decode_independent(p=pieces):
-                  return b''.join(base64.b64decode(item, validate=True) for item in p)
-              methods['independent'] = decode_independent
-              for method, loader in methods.items():
-                  try:
-                      payload = loader()
-                      lzma.decompress(payload, format=lzma.FORMAT_XZ)
-                      with tarfile.open(fileobj=io.BytesIO(payload), mode='r:xz') as archive:
-                          names_in_archive = archive.getnames()
-                      if not any(name.endswith('TORCareerUniques.sln') for name in names_in_archive):
-                          diagnostics.append(f'{label}/{method}: valid XZ but solution missing')
-                          continue
-                      valid.append((label, method, payload))
-                      diagnostics.append(f'{label}/{method}: VALID sha256={hashlib.sha256(payload).hexdigest()} bytes={len(payload)}')
-                  except Exception as exc:
-                      diagnostics.append(f'{label}/{method}: {type(exc).__name__}: {exc}')
-          print('\n'.join(diagnostics))
-          unique = {}
-          for label, method, payload in valid:
-              unique.setdefault(hashlib.sha256(payload).hexdigest(), (label, method, payload))
-          if len(unique) != 1:
-              raise RuntimeError(f'expected one unique valid source archive, found {len(unique)}')
-          digest, (label, method, payload) = next(iter(unique.items()))
-          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
-          print(f'selected={label}/{method} sha256={digest}')
-          PY
-          then
-            fail_import transport "$(cat /tmp/transport-output.txt)"
-          fi
-          if ! xz --test /tmp/TORCareerUniques-source.tar.xz 2>/tmp/xz-error.txt; then
-            fail_import xz "$(cat /tmp/xz-error.txt)" "$(cat /tmp/transport-output.txt)"
-          fi
-          rm -rf /tmp/torcu-unpack
-          mkdir -p /tmp/torcu-unpack
-          if ! tar -xJf /tmp/TORCareerUniques-source.tar.xz -C /tmp/torcu-unpack 2>/tmp/tar-error.txt; then
-            fail_import extract "$(cat /tmp/tar-error.txt)"
-          fi
-          source_root=/tmp/torcu-unpack
-          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
-            mapfile -t roots < <(find /tmp/torcu-unpack -type f -name TORCareerUniques.sln -printf '%h\n')
-            if [ "${#roots[@]}" -ne 1 ]; then
-              fail_import root "resolved_roots=${#roots[@]}" "$(find /tmp/torcu-unpack -maxdepth 3 -type f | sort | head -200)"
-            fi
-            source_root="${roots[0]}"
-          fi
-          install -m 0644 .import/overrides/Directory.Build.props "$source_root/Directory.Build.props"
-          install -m 0644 .import/overrides/Pack-Release.ps1 "$source_root/scripts/Pack-Release.ps1"
-          install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
-          install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
-          if ! pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1" >/tmp/verify-output.txt 2>&1; then
-            fail_import manifest "$(tail -200 /tmp/verify-output.txt)" "$(cat /tmp/transport-output.txt)"
-          fi
-          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) | sort | head -200)
-          if [ -n "$forbidden" ]; then
-            fail_import cleanup "$forbidden"
-          fi
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$source_root/." .
-          test -f TORCareerUniques.sln || fail_import final-tree 'Missing solution after copy.'
-          test -f SOURCE_MANIFEST.sha256 || fail_import final-tree 'Missing source manifest after copy.'
-          test -f src/TORCareerUniques/SetItemRuntime.cs || fail_import final-tree 'Missing v1.7.29 source after copy.'
-      - name: Commit canonical repository
+      - name: Align surviving transport regions
         shell: bash
         run: |
           set -euo pipefail
+          rm -f .import/diagnostic.txt
+          python3 - <<'PY' > .import/diagnostic.txt
+          import difflib, glob, pathlib, string
+          allowed = set(string.ascii_letters + string.digits + '+/=')
+          def clean_file(name):
+              raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
+              return ''.join(ch for ch in raw if ch in allowed)
+          def combine(patterns):
+              names=[]
+              for pattern in patterns:
+                  names.extend(sorted(glob.glob(pattern)))
+              return ''.join(clean_file(name) for name in names), names
+          bootstrap, bootstrap_names = combine(['bootstrap2/part.*','bootstrap2/tail.*'])
+          sets = [
+              ('source', ['bootstrap/source.part.*']),
+              ('segments', ['bootstrap/seg.*']),
+              ('minimal', ['bootstrap/min.part.*']),
+          ]
+          print('phase=overlap')
+          print(f'bootstrap2 length={len(bootstrap)}')
+          for label, patterns in sets:
+              joined, names = combine(patterns)
+              exact = bootstrap.find(joined)
+              matcher = difflib.SequenceMatcher(None, joined, bootstrap, autojunk=False)
+              match = matcher.find_longest_match(0, len(joined), 0, len(bootstrap))
+              print(f'{label}: files={names} length={len(joined)} exact_at={exact} longest_candidate={match.a} longest_bootstrap={match.b} longest_length={match.size}')
+              for name in names:
+                  piece=clean_file(name)
+                  exact_piece=bootstrap.find(piece)
+                  m=difflib.SequenceMatcher(None,piece,bootstrap,autojunk=False).find_longest_match(0,len(piece),0,len(bootstrap))
+                  print(f'  {name}: length={len(piece)} exact_at={exact_piece} longest_piece={m.a} longest_bootstrap={m.b} longest_length={m.size} prefix={piece[:12]} suffix={piece[-12:]}')
+          boundaries=[]
+          total=0
+          for name in bootstrap_names:
+              piece=clean_file(name)
+              boundaries.append((name,total,total+len(piece)))
+              total += len(piece)
+          print('bootstrap2 boundaries:')
+          for item in boundaries:
+              print(f'  {item[0]} {item[1]}..{item[2]}')
+          PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
+          git add .import/diagnostic.txt
+          git commit -m 'Record transport overlap analysis'
           git push origin HEAD:repo-rebuild-v1.7.29
+          exit 1
