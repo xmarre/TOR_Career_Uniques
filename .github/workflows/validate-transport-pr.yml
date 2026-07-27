@@ -1,0 +1,39 @@
+name: Validate transport PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'transport-v1.7.29'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify uploaded groups
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify() {
+            path="$1"
+            expected_len="$2"
+            expected_sha="$3"
+            actual_len=$(wc -c < "$path" | tr -d ' ')
+            actual_sha=$(sha256sum "$path" | awk '{print $1}')
+            printf '%s len=%s sha=%s\n' "$path" "$actual_len" "$actual_sha"
+            test "$actual_len" = "$expected_len"
+            test "$actual_sha" = "$expected_sha"
+          }
+          verify .import/new2/chunk-000 8000 016a1e51aad9033410f41a7e2c5feede0d24ff1a237a68a30e6712959b5623f2
+          verify .import/new2/chunk-001 8000 cbf65bc423ff4ff1301a44e25b83f9df8fd632028cd85590d6f79d3be55a5fc9
+          verify .import/new3/part-002-003 16000 67de661a1cc9b0075a139097316581f45f7100828768233db5cb55a1dd4db4c1
+          verify .import/new4/part-004-007 32000 e6e88e9ebade28f7dc40117ec7ec71f0a2053326a1fffbf906e726cfa30ebef2
+          verify .import/new4/part-008-009 16000 9ef7e914bbcd39a1ba6fd657a94e4267b3f1e812158c6c025c90332c5e0cbb25
+          verify .import/new4/chunk-010 8000 4332d950f122ef659e910227092e02e0ab548f0a92f113cadba731378d2cd09c
+          verify .import/new4/part-011-012 16000 51b74a320b6fd31238ce410f0523b977c12448e09582af36e1d6e40716a8afca
+          verify .import/new4/part-013-014 16000 085fd8bb67998cdfba26c386cd9c516d8fa58ec26e890266301a3edc47d88a4a
+          verify .import/new4/part-015-016 16000 621cb57d5221e123a6fdd76a17f2b86f8f5d15db2a8aca35056635e201930d96
