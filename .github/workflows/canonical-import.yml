@@ -1,142 +1,70 @@
-name: Canonical repository repair
+name: Diagnose canonical payload
 
 on:
   push:
     branches:
       - agent/canonical-import
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  validate-and-replace-main:
-    runs-on: windows-latest
-    env:
-      TRANSPORT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+  reconstruct:
+    runs-on: ubuntu-latest
     steps:
-      - name: Download transport parts
-        shell: pwsh
+      - uses: actions/checkout@v4
+      - name: Find valid canonical archive
+        shell: python
         run: |
-          $ErrorActionPreference = 'Stop'
-          $parts = @(
-            'bootstrap2/part.000',
-            'bootstrap2/part.001',
-            'bootstrap2/part.002',
-            'bootstrap2/tail.000',
-            'bootstrap2/tail.001',
-            'bootstrap2/tail.002',
-            'bootstrap2/tail.003',
-            'bootstrap2/tail.004',
-            'bootstrap2/tail.005'
-          )
-          foreach ($part in $parts) {
-            $destination = Join-Path $env:RUNNER_TEMP $part
-            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-            $url = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:TRANSPORT_REF/$part"
-            Invoke-WebRequest -Uri $url -OutFile $destination
-            Write-Host "$part $((Get-Item -LiteralPath $destination).Length) bytes"
-          }
-          "TRANSPORT_ROOT=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          import base64
+          import hashlib
+          import itertools
+          import lzma
+          import pathlib
+          import tarfile
 
-      - name: Assemble canonical archive
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $parts = @(
-            'bootstrap2/part.000',
-            'bootstrap2/part.001',
-            'bootstrap2/part.002',
-            'bootstrap2/tail.000',
-            'bootstrap2/tail.001',
-            'bootstrap2/tail.002',
-            'bootstrap2/tail.003',
-            'bootstrap2/tail.004',
-            'bootstrap2/tail.005'
-          ) | ForEach-Object { Join-Path $env:TRANSPORT_ROOT $_ }
-          $encoded = ($parts | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join ''
-          Write-Host "Encoded payload characters: $($encoded.Length)"
-          $archive = Join-Path $env:RUNNER_TEMP 'torcu-canonical.tar.xz'
-          [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($encoded))
-          $canonical = Join-Path $env:RUNNER_TEMP 'torcu-canonical'
-          "CANONICAL_ARCHIVE=$archive" >> $env:GITHUB_ENV
-          "CANONICAL_ROOT=$canonical" >> $env:GITHUB_ENV
+          root = pathlib.Path('.')
+          fixed = [root / '.canonical-source' / f'part.{i:03d}' for i in range(5)]
+          extras = [
+              root / '.canonical-source-tail' / 'part.000',
+              root / '.canonical-source-after6' / 'part.000',
+              root / '.canonical-source-rest' / 'part.000',
+              root / '.canonical' / 'part.000',
+          ]
+          candidates = fixed + extras
+          for path in candidates:
+              data = ''.join(path.read_text(encoding='utf-8').split())
+              print(f'{path}: {len(data)} chars prefix={data[:12]} suffix={data[-12:]}')
 
-      - name: Verify canonical archive hash
-        shell: pwsh
-        run: |
-          $expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
-          $actual = (Get-FileHash -LiteralPath $env:CANONICAL_ARCHIVE -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "Canonical archive SHA-256: $actual"
-          if ($actual -ne $expected) {
-            throw "Canonical archive SHA-256 mismatch. Expected $expected, got $actual"
-          }
-
-      - name: Extract canonical source tree
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Remove-Item -LiteralPath $env:CANONICAL_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $env:CANONICAL_ROOT | Out-Null
-          & tar -xJf $env:CANONICAL_ARCHIVE -C $env:CANONICAL_ROOT
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to extract canonical source archive.'
-          }
-
-      - name: Reject cleanup debris
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $forbidden = Get-ChildItem -LiteralPath $env:CANONICAL_ROOT -Recurse -Force -File | Where-Object {
-            $_.Name -match '(?i)(validation|investigation|patch_evidence|runtime_compatibility_fix|\.pdb$|\.log$)' -or
-            $_.FullName -match '(?i)[\\/](bootstrap|bootstrap2)[\\/]'
-          }
-          if ($forbidden) {
-            $forbidden.FullName | ForEach-Object { Write-Error "Forbidden cleanup debris: $_" }
-            throw 'Canonical source still contains cleanup debris.'
-          }
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Verify source manifest
-        shell: pwsh
-        working-directory: ${{ env.CANONICAL_ROOT }}
-        run: ./scripts/verify-source.ps1
-
-      - name: Restore
-        shell: pwsh
-        working-directory: ${{ env.CANONICAL_ROOT }}
-        run: dotnet restore ./TORCareerUniques.sln
-
-      - name: Build
-        shell: pwsh
-        working-directory: ${{ env.CANONICAL_ROOT }}
-        run: dotnet build ./TORCareerUniques.sln -c Release --no-restore
-
-      - name: Package
-        shell: pwsh
-        working-directory: ${{ env.CANONICAL_ROOT }}
-        run: ./scripts/package.ps1 -Version 1.7.29 -Configuration Release
-
-      - name: Replace main with canonical history
-        if: github.event_name == 'push'
-        shell: pwsh
-        working-directory: ${{ env.CANONICAL_ROOT }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          git init
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Establish v1.7.29 development baseline'
-          git branch -M main
-          git remote add origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
-          git push --force origin main
+          expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
+          fixed_text = [''.join(p.read_text(encoding='utf-8').split()) for p in fixed]
+          found = False
+          for count in range(0, len(extras) + 1):
+              for order in itertools.permutations(extras, count):
+                  texts = fixed_text + [''.join(p.read_text(encoding='utf-8').split()) for p in order]
+                  joined = ''.join(texts)
+                  try:
+                      raw = base64.b64decode(joined, validate=True)
+                  except Exception:
+                      continue
+                  if not raw.startswith(b'\xfd7zXZ\x00'):
+                      continue
+                  digest = hashlib.sha256(raw).hexdigest()
+                  print('XZ candidate:', [str(p) for p in fixed + list(order)], len(raw), digest)
+                  try:
+                      decompressed = lzma.decompress(raw)
+                  except Exception as exc:
+                      print('XZ decompression failed:', exc)
+                      continue
+                  print('VALID XZ:', [str(p) for p in fixed + list(order)], 'tar bytes', len(decompressed))
+                  pathlib.Path('/tmp/canonical.tar.xz').write_bytes(raw)
+                  with tarfile.open('/tmp/canonical.tar.xz', 'r:xz') as archive:
+                      names = archive.getnames()
+                  print('Archive entries:', len(names))
+                  print('\n'.join(names[:80]))
+                  if digest == expected:
+                      print('EXPECTED ARCHIVE FOUND')
+                  found = True
+          if not found:
+              raise SystemExit('No valid XZ archive could be reconstructed from the committed fragments.')
