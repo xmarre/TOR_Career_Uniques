@@ -18,13 +18,13 @@ jobs:
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Align surviving transport regions
+      - name: Locate surviving transport anchors
         shell: bash
         run: |
           set -euo pipefail
           rm -f .import/diagnostic.txt
           python3 - <<'PY' > .import/diagnostic.txt
-          import difflib, glob, pathlib, string
+          import glob, pathlib, string
           allowed = set(string.ascii_letters + string.digits + '+/=')
           def clean_file(name):
               raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
@@ -35,37 +35,39 @@ jobs:
                   names.extend(sorted(glob.glob(pattern)))
               return ''.join(clean_file(name) for name in names), names
           bootstrap, bootstrap_names = combine(['bootstrap2/part.*','bootstrap2/tail.*'])
-          sets = [
-              ('source', ['bootstrap/source.part.*']),
-              ('segments', ['bootstrap/seg.*']),
-              ('minimal', ['bootstrap/min.part.*']),
-          ]
-          print('phase=overlap')
+          print('phase=anchors')
           print(f'bootstrap2 length={len(bootstrap)}')
-          for label, patterns in sets:
+          for label, patterns in [('source',['bootstrap/source.part.*']),('segments',['bootstrap/seg.*']),('minimal',['bootstrap/min.part.*'])]:
               joined, names = combine(patterns)
-              exact = bootstrap.find(joined)
-              matcher = difflib.SequenceMatcher(None, joined, bootstrap, autojunk=False)
-              match = matcher.find_longest_match(0, len(joined), 0, len(bootstrap))
-              print(f'{label}: files={names} length={len(joined)} exact_at={exact} longest_candidate={match.a} longest_bootstrap={match.b} longest_length={match.size}')
+              prefix=0
+              for a,b in zip(joined,bootstrap):
+                  if a != b: break
+                  prefix += 1
+              print(f'{label}: length={len(joined)} exact_at={bootstrap.find(joined)} common_prefix={prefix}')
               for name in names:
                   piece=clean_file(name)
-                  exact_piece=bootstrap.find(piece)
-                  m=difflib.SequenceMatcher(None,piece,bootstrap,autojunk=False).find_longest_match(0,len(piece),0,len(bootstrap))
-                  print(f'  {name}: length={len(piece)} exact_at={exact_piece} longest_piece={m.a} longest_bootstrap={m.b} longest_length={m.size} prefix={piece[:12]} suffix={piece[-12:]}')
-          boundaries=[]
+                  print(f'  {name}: length={len(piece)} exact_at={bootstrap.find(piece)}')
+                  positions=sorted(set([0,max(0,len(piece)//4-32),max(0,len(piece)//2-32),max(0,3*len(piece)//4-32),max(0,len(piece)-64)]))
+                  for pos in positions:
+                      seed=piece[pos:pos+64]
+                      hits=[]
+                      start=0
+                      while seed and len(hits)<8:
+                          found=bootstrap.find(seed,start)
+                          if found<0: break
+                          hits.append(found)
+                          start=found+1
+                      print(f'    anchor piece={pos} bootstrap_hits={hits}')
           total=0
+          print('bootstrap2 boundaries:')
           for name in bootstrap_names:
               piece=clean_file(name)
-              boundaries.append((name,total,total+len(piece)))
+              print(f'  {name} {total}..{total+len(piece)}')
               total += len(piece)
-          print('bootstrap2 boundaries:')
-          for item in boundaries:
-              print(f'  {item[0]} {item[1]}..{item[2]}')
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .import/diagnostic.txt
-          git commit -m 'Record transport overlap analysis'
+          git commit -m 'Record fast transport anchor analysis'
           git push origin HEAD:repo-rebuild-v1.7.29
           exit 1
