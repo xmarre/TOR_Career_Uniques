@@ -41,29 +41,67 @@ jobs:
             git push origin HEAD:repo-rebuild-v1.7.29
             exit 1
           }
-          if ! python3 - <<'PY' >/tmp/base64-diagnostic.txt 2>&1
-          import base64, glob, pathlib, string
-          alphabet = set(string.ascii_letters + string.digits + '+/=')
+          if ! python3 - <<'PY' >/tmp/repair-output.txt 2>&1
+          import base64, binascii, glob, lzma, pathlib, string, zlib
+          alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
           files = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
-          pieces = []
+          pieces = {}
+          allowed = set(alphabet + '=')
           for name in files:
               raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
-              clean = ''.join(ch for ch in raw if ch in alphabet)
-              eq = [i for i, ch in enumerate(clean) if ch == '=']
-              print(f'{name}: raw={len(raw)} clean={len(clean)} mod4={len(clean)%4} equals={eq[:8]} prefix={clean[:12]} suffix={clean[-12:]}')
-              pieces.append(clean)
-          joined = ''.join(pieces)
-          eq = [i for i, ch in enumerate(joined) if ch == '=']
-          print(f'joined: length={len(joined)} mod4={len(joined)%4} equals_count={len(eq)} equals_first={eq[:20]} equals_last={eq[-20:]}')
-          data = base64.b64decode(joined, validate=True)
-          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(data)
-          print(f'decoded_bytes={len(data)}')
+              pieces[name] = ''.join(ch for ch in raw if ch in allowed)
+          prefix_names = sorted(glob.glob('bootstrap2/part.*')) + ['bootstrap2/tail.000', 'bootstrap2/tail.001']
+          suffix_names = ['bootstrap2/tail.002', 'bootstrap2/tail.003', 'bootstrap2/tail.004', 'bootstrap2/tail.005']
+          prefix = ''.join(pieces[name] for name in prefix_names)
+          suffix = ''.join(pieces[name] for name in suffix_names)
+          if len(prefix) % 4 != 3:
+              raise RuntimeError(f'unexpected missing-middle boundary: prefix length {len(prefix)} mod4={len(prefix)%4}')
+          if not suffix.endswith('=='):
+              raise RuntimeError('transport no longer ends with the expected double padding')
+          footer_pairs = []
+          tail_prefix = suffix[-22:-2]
+          for a in alphabet:
+              for b in alphabet:
+                  tail_text = tail_prefix + a + b + '=='
+                  try:
+                      tail_bytes = base64.b64decode(tail_text, validate=True)
+                  except binascii.Error:
+                      continue
+                  if len(tail_bytes) < 12:
+                      continue
+                  footer = tail_bytes[-12:]
+                  if footer[-2:] != b'YZ':
+                      continue
+                  stored_crc = int.from_bytes(footer[:4], 'little')
+                  if zlib.crc32(footer[4:10]) & 0xffffffff != stored_crc:
+                      continue
+                  footer_pairs.append((a, b))
+          if not footer_pairs:
+              raise RuntimeError('no two-character repair produced a valid XZ stream footer')
+          repaired = []
+          for end_a, end_b in footer_pairs:
+              repaired_suffix = suffix[:-2] + end_a + end_b + suffix[-2:]
+              for middle in alphabet:
+                  candidate = prefix + middle + repaired_suffix
+                  try:
+                      payload = base64.b64decode(candidate, validate=True)
+                      lzma.decompress(payload, format=lzma.FORMAT_XZ)
+                  except (binascii.Error, lzma.LZMAError):
+                      continue
+                  repaired.append((middle, end_a, end_b, payload))
+          if len(repaired) != 1:
+              raise RuntimeError(f'expected one XZ-valid repair, found {len(repaired)}')
+          middle, end_a, end_b, payload = repaired[0]
+          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
+          print(f'repaired_missing_chars={middle}{end_a}{end_b}')
+          print(f'archive_bytes={len(payload)}')
+          print(f'archive_sha256={__import__("hashlib").sha256(payload).hexdigest()}')
           PY
           then
-            fail_import decode "$(cat /tmp/base64-diagnostic.txt)"
+            fail_import repair "$(cat /tmp/repair-output.txt)"
           fi
           if ! xz --test /tmp/TORCareerUniques-source.tar.xz 2>/tmp/xz-error.txt; then
-            fail_import xz "$(cat /tmp/xz-error.txt)" "sha256=$(sha256sum /tmp/TORCareerUniques-source.tar.xz)"
+            fail_import xz "$(cat /tmp/xz-error.txt)" "$(cat /tmp/repair-output.txt)"
           fi
           rm -rf /tmp/torcu-unpack
           mkdir -p /tmp/torcu-unpack
@@ -83,7 +121,7 @@ jobs:
           install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
           install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
           if ! pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1" >/tmp/verify-output.txt 2>&1; then
-            fail_import manifest "$(tail -200 /tmp/verify-output.txt)"
+            fail_import manifest "$(tail -200 /tmp/verify-output.txt)" "$(cat /tmp/repair-output.txt)"
           fi
           forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) | sort | head -200)
           if [ -n "$forbidden" ]; then
