@@ -15,14 +15,10 @@ permissions:
 jobs:
   validate-and-replace-main:
     runs-on: windows-latest
+    env:
+      TRANSPORT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: Check out transport branch
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          show-progress: false
-
-      - name: Assemble canonical archive
+      - name: Download transport parts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -38,11 +34,31 @@ jobs:
             'bootstrap2/tail.005'
           )
           foreach ($part in $parts) {
-            if (-not (Test-Path -LiteralPath $part -PathType Leaf)) {
-              throw "Missing transport part: $part"
-            }
+            $destination = Join-Path $env:RUNNER_TEMP $part
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            $url = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:TRANSPORT_REF/$part"
+            Invoke-WebRequest -Uri $url -OutFile $destination
+            Write-Host "$part $((Get-Item -LiteralPath $destination).Length) bytes"
           }
+          "TRANSPORT_ROOT=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+
+      - name: Assemble canonical archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = @(
+            'bootstrap2/part.000',
+            'bootstrap2/part.001',
+            'bootstrap2/part.002',
+            'bootstrap2/tail.000',
+            'bootstrap2/tail.001',
+            'bootstrap2/tail.002',
+            'bootstrap2/tail.003',
+            'bootstrap2/tail.004',
+            'bootstrap2/tail.005'
+          ) | ForEach-Object { Join-Path $env:TRANSPORT_ROOT $_ }
           $encoded = ($parts | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join ''
+          Write-Host "Encoded payload characters: $($encoded.Length)"
           $archive = Join-Path $env:RUNNER_TEMP 'torcu-canonical.tar.xz'
           [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($encoded))
           $canonical = Join-Path $env:RUNNER_TEMP 'torcu-canonical'
@@ -54,6 +70,7 @@ jobs:
         run: |
           $expected = 'c72ac5bef80c6c7c0f6d112c04c4dfd904ec0f4bebeb185edb9a707aca21b780'
           $actual = (Get-FileHash -LiteralPath $env:CANONICAL_ARCHIVE -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Canonical archive SHA-256: $actual"
           if ($actual -ne $expected) {
             throw "Canonical archive SHA-256 mismatch. Expected $expected, got $actual"
           }
@@ -86,8 +103,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: ${{ env.CANONICAL_ROOT }}/Directory.Packages.props
 
       - name: Verify source manifest
         shell: pwsh
