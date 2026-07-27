@@ -1,0 +1,46 @@
+name: Import canonical source
+
+on:
+  push:
+    branches: [repo-rebuild-v1.7.29]
+    paths: ['.import/ready']
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout import branch
+        uses: actions/checkout@v4
+        with:
+          ref: repo-rebuild-v1.7.29
+          fetch-depth: 0
+      - name: Reconstruct and verify canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .import/chunk-* | base64 --decode > /tmp/TORCareerUniques-source.tar.xz
+          echo 'afdb87e24b5a30f20009e6747dd067edfba1046ec80a13bc00fce4a61bf6ce0c  /tmp/TORCareerUniques-source.tar.xz' | sha256sum --check --strict
+          rm -rf /tmp/torcu-source
+          mkdir -p /tmp/torcu-source
+          tar -xJf /tmp/TORCareerUniques-source.tar.xz -C /tmp/torcu-source
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/torcu-source/. .
+          test -f TORCareerUniques.sln
+          test -f SOURCE_MANIFEST.sha256
+          test -f src/TORCareerUniques/SetItemRuntime.cs
+          if find . -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path './.import/*' \) -print -quit | grep -q .; then
+            echo 'Forbidden cleanup artifact survived canonical import.' >&2
+            exit 1
+          fi
+      - name: Commit canonical repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
+          git push origin HEAD:repo-rebuild-v1.7.29
