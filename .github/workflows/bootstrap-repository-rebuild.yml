@@ -41,8 +41,8 @@ jobs:
             git push origin HEAD:repo-rebuild-v1.7.29
             exit 1
           }
-          if ! cat bootstrap2/part.* bootstrap2/tail.* | base64 --decode > /tmp/TORCareerUniques-source.tar.xz; then
-            fail_import decode 'The existing canonical transport is not valid base64.'
+          if ! cat bootstrap2/part.* bootstrap2/tail.* | LC_ALL=C tr -cd 'A-Za-z0-9+/=' | base64 --decode > /tmp/TORCareerUniques-source.tar.xz; then
+            fail_import decode 'The normalized canonical transport is not valid base64.'
           fi
           if ! xz --test /tmp/TORCareerUniques-source.tar.xz 2>/tmp/xz-error.txt; then
             fail_import xz "$(cat /tmp/xz-error.txt)" "sha256=$(sha256sum /tmp/TORCareerUniques-source.tar.xz)"
