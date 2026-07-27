@@ -41,12 +41,27 @@ jobs:
             git push origin HEAD:repo-rebuild-v1.7.29
             exit 1
           }
-          : > /tmp/TORCareerUniques-source.tar.xz
-          for chunk in bootstrap2/part.* bootstrap2/tail.*; do
-            if ! LC_ALL=C tr -cd 'A-Za-z0-9+/=' < "$chunk" | base64 --decode >> /tmp/TORCareerUniques-source.tar.xz; then
-              fail_import decode "Independent chunk decode failed: $chunk"
-            fi
-          done
+          if ! python3 - <<'PY' >/tmp/base64-diagnostic.txt 2>&1
+          import base64, glob, pathlib, string
+          alphabet = set(string.ascii_letters + string.digits + '+/=')
+          files = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
+          pieces = []
+          for name in files:
+              raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
+              clean = ''.join(ch for ch in raw if ch in alphabet)
+              eq = [i for i, ch in enumerate(clean) if ch == '=']
+              print(f'{name}: raw={len(raw)} clean={len(clean)} mod4={len(clean)%4} equals={eq[:8]} prefix={clean[:12]} suffix={clean[-12:]}')
+              pieces.append(clean)
+          joined = ''.join(pieces)
+          eq = [i for i, ch in enumerate(joined) if ch == '=']
+          print(f'joined: length={len(joined)} mod4={len(joined)%4} equals_count={len(eq)} equals_first={eq[:20]} equals_last={eq[-20:]}')
+          data = base64.b64decode(joined, validate=True)
+          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(data)
+          print(f'decoded_bytes={len(data)}')
+          PY
+          then
+            fail_import decode "$(cat /tmp/base64-diagnostic.txt)"
+          fi
           if ! xz --test /tmp/TORCareerUniques-source.tar.xz 2>/tmp/xz-error.txt; then
             fail_import xz "$(cat /tmp/xz-error.txt)" "sha256=$(sha256sum /tmp/TORCareerUniques-source.tar.xz)"
           fi
