@@ -42,60 +42,60 @@ jobs:
             exit 1
           }
           if ! python3 - <<'PY' >/tmp/repair-output.txt 2>&1
-          import base64, binascii, glob, lzma, pathlib, string, zlib
+          import base64, binascii, glob, hashlib, lzma, pathlib, string
           alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
-          files = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
-          pieces = {}
           allowed = set(alphabet + '=')
-          for name in files:
+          def clean(name):
               raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
-              pieces[name] = ''.join(ch for ch in raw if ch in allowed)
+              return ''.join(ch for ch in raw if ch in allowed)
           prefix_names = sorted(glob.glob('bootstrap2/part.*')) + ['bootstrap2/tail.000', 'bootstrap2/tail.001']
-          suffix_names = ['bootstrap2/tail.002', 'bootstrap2/tail.003', 'bootstrap2/tail.004', 'bootstrap2/tail.005']
-          prefix = ''.join(pieces[name] for name in prefix_names)
-          suffix = ''.join(pieces[name] for name in suffix_names)
-          if len(prefix) % 4 != 3:
-              raise RuntimeError(f'unexpected missing-middle boundary: prefix length {len(prefix)} mod4={len(prefix)%4}')
-          if not suffix.endswith('=='):
-              raise RuntimeError('transport no longer ends with the expected double padding')
-          footer_pairs = []
-          tail_prefix = suffix[-22:-2]
-          for a in alphabet:
-              for b in alphabet:
-                  tail_text = tail_prefix + a + b + '=='
+          middle_names = ['bootstrap2/tail.002', 'bootstrap2/tail.003', 'bootstrap2/tail.004']
+          prefix = ''.join(clean(name) for name in prefix_names)
+          middle = ''.join(clean(name) for name in middle_names)
+          tail = clean('bootstrap2/tail.005')
+          if len(prefix) % 4 != 3 or len(middle) % 4 != 0 or len(tail) % 4 != 2 or not tail.endswith('=='):
+              raise RuntimeError(f'unexpected boundary shape: prefix={len(prefix)%4}, middle={len(middle)%4}, tail={len(tail)%4}, tail_padding={tail[-2:]}')
+          prefix_candidates = []
+          for missing in alphabet:
+              text = prefix + missing + middle
+              try:
+                  data = base64.b64decode(text, validate=True)
+                  decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+                  decoder.decompress(data)
+              except (binascii.Error, lzma.LZMAError):
+                  continue
+              prefix_candidates.append((missing, data))
+          print('prefix_candidates=' + ''.join(item[0] for item in prefix_candidates))
+          if not prefix_candidates:
+              raise RuntimeError('no middle-boundary character survived incremental XZ decompression')
+          tail_candidates = []
+          for first in alphabet:
+              for second in alphabet:
+                  text = first + second + tail
                   try:
-                      tail_bytes = base64.b64decode(tail_text, validate=True)
+                      data = base64.b64decode(text, validate=True)
                   except binascii.Error:
                       continue
-                  if len(tail_bytes) < 12:
-                      continue
-                  footer = tail_bytes[-12:]
-                  if footer[-2:] != b'YZ':
-                      continue
-                  stored_crc = int.from_bytes(footer[:4], 'little')
-                  if zlib.crc32(footer[4:10]) & 0xffffffff != stored_crc:
-                      continue
-                  footer_pairs.append((a, b))
-          if not footer_pairs:
-              raise RuntimeError('no two-character repair produced a valid XZ stream footer')
+                  tail_candidates.append((first, second, data))
           repaired = []
-          for end_a, end_b in footer_pairs:
-              repaired_suffix = suffix[:-2] + end_a + end_b + suffix[-2:]
-              for middle in alphabet:
-                  candidate = prefix + middle + repaired_suffix
+          attempts = 0
+          for middle_char, prefix_bytes in prefix_candidates:
+              for first, second, tail_bytes in tail_candidates:
+                  attempts += 1
+                  payload = prefix_bytes + tail_bytes
                   try:
-                      payload = base64.b64decode(candidate, validate=True)
                       lzma.decompress(payload, format=lzma.FORMAT_XZ)
-                  except (binascii.Error, lzma.LZMAError):
+                  except lzma.LZMAError:
                       continue
-                  repaired.append((middle, end_a, end_b, payload))
+                  repaired.append((middle_char, first, second, payload))
+          print(f'full_attempts={attempts}')
           if len(repaired) != 1:
-              raise RuntimeError(f'expected one XZ-valid repair, found {len(repaired)}')
-          middle, end_a, end_b, payload = repaired[0]
+              raise RuntimeError(f'expected one XZ-valid boundary repair, found {len(repaired)}')
+          middle_char, first, second, payload = repaired[0]
           pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
-          print(f'repaired_missing_chars={middle}{end_a}{end_b}')
+          print(f'repaired_missing_chars={middle_char}|{first}{second}')
           print(f'archive_bytes={len(payload)}')
-          print(f'archive_sha256={__import__("hashlib").sha256(payload).hexdigest()}')
+          print(f'archive_sha256={hashlib.sha256(payload).hexdigest()}')
           PY
           then
             fail_import repair "$(cat /tmp/repair-output.txt)"
