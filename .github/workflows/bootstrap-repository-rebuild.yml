@@ -1,0 +1,64 @@
+name: Bootstrap repository rebuild
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  rebuild:
+    if: github.head_ref == 'repo-rebuild-v1.7.29'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout reconstruction branch
+        uses: actions/checkout@v4
+        with:
+          ref: repo-rebuild-v1.7.29
+          fetch-depth: 0
+      - name: Reconstruct and verify canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat bootstrap2/part.* bootstrap2/tail.* | base64 --decode > /tmp/TORCareerUniques-source.tar.xz
+          xz --test /tmp/TORCareerUniques-source.tar.xz
+          sha256sum /tmp/TORCareerUniques-source.tar.xz
+          rm -rf /tmp/torcu-unpack
+          mkdir -p /tmp/torcu-unpack
+          tar -xJf /tmp/TORCareerUniques-source.tar.xz -C /tmp/torcu-unpack
+          source_root=/tmp/torcu-unpack
+          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
+            mapfile -t roots < <(find /tmp/torcu-unpack -type f -name TORCareerUniques.sln -printf '%h\n')
+            if [ "${#roots[@]}" -ne 1 ]; then
+              echo 'Could not resolve one canonical source root.' >&2
+              find /tmp/torcu-unpack -maxdepth 3 -type f | sort
+              exit 1
+            fi
+            source_root="${roots[0]}"
+          fi
+          install -m 0644 .import/overrides/Directory.Build.props "$source_root/Directory.Build.props"
+          install -m 0644 .import/overrides/Pack-Release.ps1 "$source_root/scripts/Pack-Release.ps1"
+          install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
+          install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
+          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
+          if find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) -print -quit | grep -q .; then
+            echo 'Forbidden cleanup artifact survived canonical import.' >&2
+            exit 1
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$source_root/." .
+          test -f TORCareerUniques.sln
+          test -f SOURCE_MANIFEST.sha256
+          test -f src/TORCareerUniques/SetItemRuntime.cs
+      - name: Commit canonical repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
+          git push origin HEAD:repo-rebuild-v1.7.29
