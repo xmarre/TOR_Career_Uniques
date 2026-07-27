@@ -1,0 +1,22 @@
+phase=overlap
+bootstrap2 length=151093
+source: files=['bootstrap/source.part.000', 'bootstrap/source.part.001'] length=13500 exact_at=-1 longest_candidate=50 longest_bootstrap=50 longest_length=20
+  bootstrap/source.part.000: length=6000 exact_at=-1 longest_piece=50 longest_bootstrap=50 longest_length=20 prefix=/Td6WFoAAATm suffix=Ju8caTEbieLX
+  bootstrap/source.part.001: length=7500 exact_at=-1 longest_piece=5561 longest_bootstrap=128242 longest_length=5 prefix=yFAQBEiXWfEU suffix=GjKJAjYCZufY
+segments: files=['bootstrap/seg.000', 'bootstrap/seg.001', 'bootstrap/seg.002'] length=30000 exact_at=-1 longest_candidate=146 longest_bootstrap=130043 longest_length=5
+  bootstrap/seg.000: length=10000 exact_at=-1 longest_piece=146 longest_bootstrap=130043 longest_length=5 prefix=kLU0iryXIlRf suffix=0zYppS/FaVws
+  bootstrap/seg.001: length=10000 exact_at=-1 longest_piece=15 longest_bootstrap=120082 longest_length=4 prefix=I9u/1oZlsz2R suffix=oiomIJo4DI9f
+  bootstrap/seg.002: length=10000 exact_at=-1 longest_piece=1101 longest_bootstrap=106863 longest_length=5 prefix=E2FvM1RmC5oV suffix=o6pC90C/xryA
+minimal: files=['bootstrap/min.part.000', 'bootstrap/min.part.001'] length=23500 exact_at=-1 longest_candidate=50 longest_bootstrap=50 longest_length=20
+  bootstrap/min.part.000: length=8500 exact_at=-1 longest_piece=50 longest_bootstrap=50 longest_length=20 prefix=/Td6WFoAAATm suffix=of8I9YjF+cal
+  bootstrap/min.part.001: length=15000 exact_at=-1 longest_piece=4781 longest_bootstrap=67427 longest_length=5 prefix=o2NQcudPsEWu suffix=4/fCc5FF6GxB
+bootstrap2 boundaries:
+  bootstrap2/part.000 0..9000
+  bootstrap2/part.001 9000..18000
+  bootstrap2/part.002 18000..27000
+  bootstrap2/tail.000 27000..36000
+  bootstrap2/tail.001 36000..53999
+  bootstrap2/tail.002 53999..71999
+  bootstrap2/tail.003 71999..89999
+  bootstrap2/tail.004 89999..107999
+  bootstrap2/tail.005 107999..151093
