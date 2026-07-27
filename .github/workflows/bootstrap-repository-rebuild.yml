@@ -10,22 +10,22 @@ permissions:
   pull-requests: read
 
 jobs:
-  analyze:
+  rebuild:
     if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Localize first missing base64 character
+      - name: Repair and validate canonical transport
         shell: bash
         run: |
           set -euo pipefail
           rm -f .import/diagnostic.txt
-          python3 - <<'PY' > .import/diagnostic.txt
-          import base64, glob, heapq, lzma, pathlib, string
+          python3 - <<'PY' > /tmp/repair-report.txt
+          import base64, glob, hashlib, heapq, lzma, pathlib, string
 
           alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
           allowed = set(alphabet + '=')
@@ -35,25 +35,18 @@ jobs:
               return ''.join(ch for ch in raw if ch in allowed)
 
           names = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
-          pieces = [(name, clean(name)) for name in names]
-          joined = ''.join(piece for _, piece in pieces)
-
-          boundaries = {}
-          offset = 0
-          for name, piece in pieces:
-              boundaries[name] = (offset, offset + len(piece))
-              offset += len(piece)
+          original = ''.join(clean(name) for name in names)
 
           def decode_lenient(text):
               core = text.rstrip('=')
               core += 'A' * ((-len(core)) % 4)
               return base64.b64decode(core, validate=True)
 
-          def score(text, block=256):
+          def score(text, block=512):
               try:
                   data = decode_lenient(text)
               except Exception:
-                  return -1
+                  return -1, None
               decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
               pos = 0
               try:
@@ -62,60 +55,140 @@ jobs:
                       decoder.decompress(data[pos:end])
                       pos = end
                       if decoder.eof:
-                          return len(data) + 10_000_000
+                          try:
+                              payload = base64.b64decode(text, validate=True)
+                              lzma.decompress(payload, format=lzma.FORMAT_XZ)
+                              return len(data) + 100_000_000, payload
+                          except Exception:
+                              return pos, None
               except lzma.LZMAError:
-                  return pos
-              return len(data)
+                  return pos, None
+              return len(data), None
 
-          baseline = score(joined, block=16)
-          center = baseline * 4 // 3
-          lo_bound, hi_bound = boundaries['bootstrap2/tail.001']
-          coarse_lo = max(lo_bound, center - 2048)
-          coarse_hi = min(hi_bound, center + 192)
+          def best_insertions(text, base_score, parent_edits, beam_per_state=18):
+              center = base_score * 4 // 3
+              lo = max(0, center - 640)
+              hi = min(len(text), center + 96)
+              coarse_heap = []
+              for position in range(lo, hi + 1, 8):
+                  for char in alphabet:
+                      candidate = text[:position] + char + text[position:]
+                      value, payload = score(candidate, block=512)
+                      if payload is not None:
+                          return [(value, candidate, parent_edits + [(position, char)], payload)]
+                      item = (value, position, char)
+                      if len(coarse_heap) < 28:
+                          heapq.heappush(coarse_heap, item)
+                      elif item > coarse_heap[0]:
+                          heapq.heapreplace(coarse_heap, item)
 
-          print('phase=first-missing-character')
-          print(f'joined_length={len(joined)} baseline_input_score={baseline} mapped_base64_center={center}')
-          print(f'tail001_boundary={lo_bound}..{hi_bound} search={coarse_lo}..{coarse_hi}')
+              refine_positions = set()
+              for _, position, _ in sorted(coarse_heap, reverse=True)[:16]:
+                  for p in range(max(lo, position - 8), min(hi, position + 8) + 1):
+                      refine_positions.add(p)
 
-          heap = []
-          for position in range(coarse_lo, coarse_hi + 1, 4):
-              for char in alphabet:
-                  candidate = joined[:position] + char + joined[position:]
-                  value = score(candidate, block=256)
-                  item = (value, position, char)
-                  if len(heap) < 24:
-                      heapq.heappush(heap, item)
-                  elif item > heap[0]:
-                      heapq.heapreplace(heap, item)
+              refined_heap = []
+              for position in sorted(refine_positions):
+                  for char in alphabet:
+                      candidate = text[:position] + char + text[position:]
+                      value, payload = score(candidate, block=128)
+                      edits = parent_edits + [(position, char)]
+                      if payload is not None:
+                          return [(value, candidate, edits, payload)]
+                      item = (value, position, char, candidate, edits)
+                      if len(refined_heap) < beam_per_state:
+                          heapq.heappush(refined_heap, item)
+                      elif item[:3] > refined_heap[0][:3]:
+                          heapq.heapreplace(refined_heap, item)
+              return [(value, candidate, edits, None) for value, _, _, candidate, edits in sorted(refined_heap, reverse=True)]
 
-          coarse = sorted(heap, reverse=True)
-          print('coarse_top:')
-          for value, position, char in coarse:
-              print(f'  score={value} position={position} char={char}')
+          initial_score, initial_payload = score(original, block=32)
+          print(f'initial_length={len(original)} initial_score={initial_score}')
+          beam = [(initial_score, original, [], initial_payload)]
+          winner = None
 
-          refine_positions = set()
-          for _, position, _ in coarse[:12]:
-              for p in range(max(lo_bound, position - 8), min(hi_bound, position + 8) + 1):
-                  refine_positions.add(p)
+          for depth in range(1, 4):
+              next_states = []
+              for state_index, (state_score, text, edits, payload) in enumerate(beam):
+                  if payload is not None:
+                      winner = (state_score, text, edits, payload)
+                      break
+                  results = best_insertions(text, state_score, edits)
+                  for result in results:
+                      if result[3] is not None:
+                          winner = result
+                          break
+                      next_states.append(result)
+                  if winner is not None:
+                      break
+              if winner is not None:
+                  break
 
-          heap = []
-          for position in sorted(refine_positions):
-              for char in alphabet:
-                  candidate = joined[:position] + char + joined[position:]
-                  value = score(candidate, block=32)
-                  item = (value, position, char)
-                  if len(heap) < 40:
-                      heapq.heappush(heap, item)
-                  elif item > heap[0]:
-                      heapq.heapreplace(heap, item)
+              unique = {}
+              for state in sorted(next_states, key=lambda item: item[0], reverse=True):
+                  key = tuple(state[2])
+                  unique.setdefault(key, state)
+              beam = list(unique.values())[:10]
+              print(f'depth={depth} beam={len(beam)}')
+              for rank, state in enumerate(beam[:10], 1):
+                  print(f'  rank={rank} score={state[0]} edits={state[2]}')
 
-          print('refined_top:')
-          for value, position, char in sorted(heap, reverse=True):
-              print(f'  score={value} position={position} char={char}')
+          if winner is None:
+              print('repair_result=not_found')
+              raise SystemExit(2)
+
+          value, repaired_text, edits, payload = winner
+          digest = hashlib.sha256(payload).hexdigest()
+          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
+          print(f'repair_result=success score={value} edits={edits}')
+          print(f'archive_bytes={len(payload)} archive_sha256={digest}')
           PY
+          repair_status=$?
+          if [ "$repair_status" -ne 0 ]; then
+            {
+              echo 'phase=beam-repair'
+              cat /tmp/repair-report.txt
+            } > .import/diagnostic.txt
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add .import/diagnostic.txt
+            git commit -m 'Record bounded transport repair result'
+            git push origin HEAD:repo-rebuild-v1.7.29
+            exit 1
+          fi
+
+          xz --test /tmp/TORCareerUniques-source.tar.xz
+          rm -rf /tmp/torcu-unpack
+          mkdir -p /tmp/torcu-unpack
+          tar -xJf /tmp/TORCareerUniques-source.tar.xz -C /tmp/torcu-unpack
+          source_root=/tmp/torcu-unpack
+          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
+            mapfile -t roots < <(find /tmp/torcu-unpack -type f -name TORCareerUniques.sln -printf '%h\n')
+            test "${#roots[@]}" -eq 1
+            source_root="${roots[0]}"
+          fi
+
+          install -m 0644 .import/overrides/Directory.Build.props "$source_root/Directory.Build.props"
+          install -m 0644 .import/overrides/Pack-Release.ps1 "$source_root/scripts/Pack-Release.ps1"
+          install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
+          install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
+          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
+
+          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) | sort)
+          test -z "$forbidden"
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$source_root/." .
+          test -f TORCareerUniques.sln
+          test -f SOURCE_MANIFEST.sha256
+          test -f src/TORCareerUniques/SetItemRuntime.cs
+          cp /tmp/repair-report.txt /tmp/final-repair-report.txt
+      - name: Commit canonical repository
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .import/diagnostic.txt
-          git commit -m 'Record first transport corruption localization'
+          git add --all
+          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
           git push origin HEAD:repo-rebuild-v1.7.29
-          exit 1
