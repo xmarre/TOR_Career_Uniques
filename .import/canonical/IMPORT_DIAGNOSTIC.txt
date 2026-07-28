@@ -1,8 +1,8 @@
 phase=archive-hash
 expected=40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5
-actual=fa8c7389525e251daab3408342816c9150b050a535debf6306f34086297e273d
-chunk_count=30
-chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-0020.txt .import/canonical/part-0021.txt .import/canonical/part-0022.txt .import/canonical/part-0023.txt .import/canonical/part-0024.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016a0.txt .import/canonical/part-016a1.txt .import/canonical/part-016a2.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
+actual=981a60673ccf5adbfc80649318f6aea550a5b7c41e76b6deb4630528aaccf7bb
+chunk_count=31
+chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-0020.txt .import/canonical/part-0021.txt .import/canonical/part-0022.txt .import/canonical/part-0023.txt .import/canonical/part-0024.txt .import/canonical/part-0025.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016a0.txt .import/canonical/part-016a1.txt .import/canonical/part-016a2.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
 chunk_inventory:
 12000 31e5c7a02fdfd32ef79107df7b335a2da95be845 .import/canonical/part-000.txt
 12000 8c1212b72e4e0c17a18dd3e54b554756e2d3ffeb .import/canonical/part-001.txt
@@ -11,6 +11,7 @@ chunk_inventory:
 2000 21d265089db6c12d4be24a2348d681a912926e16 .import/canonical/part-0022.txt
 2000 b8f049023ce5ef9163ccafbf05d3bd675f98659f .import/canonical/part-0023.txt
 2000 98bee02a2b04d86c911ebfddbbee18d6474c6b8f .import/canonical/part-0024.txt
+2000 6d9d8356fc01c20f68c850491eff77b7b43f5e28 .import/canonical/part-0025.txt
 12000 c4f5ce0385025e4d1f589295a591e5d1cd0afee1 .import/canonical/part-003.txt
 12000 26ed88658dd9848687628473fb3ea143b12eb49d .import/canonical/part-004.txt
 12000 20f2e9486e5ab6cec5c5941dd2917a98f374a4dd .import/canonical/part-005.txt
@@ -34,5 +35,5 @@ chunk_inventory:
 6000 ac8e15ebb7d28c111f62f5ef07396b2b500b387a .import/canonical/part-016b.txt
 12000 c65aa436942ab210a45158d1a1ae97a317ab0799 .import/canonical/part-017.txt
 1504 aed66d96bdcf2f8ffcdc125ad5b776d6a24d5266 .import/canonical/part-018.txt
-archive_sha256=fa8c7389525e251daab3408342816c9150b050a535debf6306f34086297e273d
-archive_bytes=152628
+archive_sha256=981a60673ccf5adbfc80649318f6aea550a5b7c41e76b6deb4630528aaccf7bb
+archive_bytes=154128
