@@ -84,3 +84,5 @@ jobs:
           else
             gh release create "$tag" artifacts/release/* --title "TOR Career Uniques $tag" --notes-file RELEASE_NOTES.md --verify-tag
           fi
+
+# refresh merge ref after bootstrap removal
