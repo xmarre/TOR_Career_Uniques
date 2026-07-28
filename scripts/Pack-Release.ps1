@@ -65,7 +65,7 @@ Get-ChildItem -LiteralPath $repoRoot -Force | Where-Object { $excludedTop -notco
 }
 $fullBin = Join-Path $fullRoot 'Modules/TORCareerUniques/bin/Win64_Shipping_Client'
 New-Item -ItemType Directory -Path $fullBin -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $cleanBin '*') -Destination $fullBin -Force
+Copy-Item -Path (Join-Path $cleanBin '*') -Destination $fullBin -Force
 
 $cleanName = "TOR_Career_Uniques_v${Version}_Bannerlord_1.3.15_TOR_1.16_CLEAN.zip"
 $sourceName = "TOR_Career_Uniques_v${Version}_FULL_SOURCE_Bannerlord_1.3.15_TOR_1.16.zip"
