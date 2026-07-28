@@ -12,12 +12,19 @@ namespace TORCareerUniques
         private const string EncounterHeroInitializationSafetyHarmonyId =
             "torcareeruniques.encounterheroes.initialization-safety";
 
-        // A static field on the behavior guarantees installation before its first
-        // instance can create or reconcile an encounter hero. Bannerlord.Harmony is
-        // a required module dependency, so the reflection-only patch has no additional
-        // runtime package dependency.
         private static readonly bool EncounterHeroInitializationSafetyInstalled =
             InstallEncounterHeroInitializationSafety();
+
+        // An explicit type constructor removes beforefieldinit semantics. The rollback
+        // patch is therefore installed before the first behavior instance can execute
+        // GetOrCreateEncounterHero instead of depending on an otherwise unreferenced
+        // static-field initializer being scheduled eagerly by the runtime.
+        static UniqueEncounterBehavior()
+        {
+            if (!EncounterHeroInitializationSafetyInstalled)
+                throw new InvalidOperationException(
+                    "Encounter-hero initialization safety was not installed.");
+        }
 
         private sealed class EncounterHeroCreationState
         {
