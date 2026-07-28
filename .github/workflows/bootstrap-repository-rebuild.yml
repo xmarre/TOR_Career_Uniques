@@ -18,20 +18,27 @@ jobs:
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Import canonical repository tree
+
+      - name: Verify canonical archive
         shell: bash
         run: |
           set -euo pipefail
           expected='40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5'
           archive=/tmp/TORCareerUniques-v1.7.29-source.tar.xz
-
           mapfile -t chunks < <(find .import/canonical -maxdepth 1 -type f -name 'part-*.txt' | sort)
           test "${#chunks[@]}" -gt 0
           cat "${chunks[@]}" | base64 --decode > "$archive"
           actual=$(sha256sum "$archive" | awk '{print $1}')
+          echo "archive_sha256=$actual"
+          echo "archive_bytes=$(stat -c %s "$archive")"
           test "$actual" = "$expected"
           xz --test "$archive"
 
+      - name: Verify canonical source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=/tmp/TORCareerUniques-v1.7.29-source.tar.xz
           rm -rf /tmp/torcu-canonical
           mkdir -p /tmp/torcu-canonical
           tar -xJf "$archive" -C /tmp/torcu-canonical
@@ -41,7 +48,7 @@ jobs:
             test "${#roots[@]}" -eq 1
             source_root="${roots[0]}"
           fi
-
+          echo "$source_root" > /tmp/torcu-source-root
           test -f "$source_root/TORCareerUniques.sln"
           test -f "$source_root/SOURCE_MANIFEST.sha256"
           test -f "$source_root/src/TORCareerUniques/SetItemRuntime.cs"
@@ -50,13 +57,16 @@ jobs:
             sha256sum --check --strict SOURCE_MANIFEST.sha256
           )
           pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
-
           forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
           test -z "$forbidden"
 
+      - name: Commit canonical source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_root=$(cat /tmp/torcu-source-root)
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "$source_root/." .
-
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add --all
