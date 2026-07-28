@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+  <Name value="TOR Career Uniques" />
+  <Id value="TORCareerUniques" />
+    <Version value="v1.7.29" />
+  <DefaultModule value="false" />
+  <SingleplayerModule value="true" />
+  <Official value="false" />
+
+  <DependedModules>
+    <DependedModule Id="Native" />
+    <DependedModule Id="SandBoxCore" />
+    <DependedModule Id="Sandbox" />
+    <DependedModule Id="StoryMode" Optional="true" />
+    <DependedModule Id="Bannerlord.Harmony" />
+    <DependedModule Id="Bannerlord.MBOptionScreen" />
+    <DependedModule Id="TOR_Core" />
+  </DependedModules>
+
+  <SubModules>
+    <SubModule>
+      <Name value="TOR Career Uniques" />
+      <DLLName value="TORCareerUniques.dll" />
+      <SubModuleClassType value="TORCareerUniques.SubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
+      <Name value="TOR Career Uniques - Compatibility Fixes" />
+      <DLLName value="TORCareerUniques.CompatibilityFixes.dll" />
+      <SubModuleClassType value="TORCareerUniques.CompatibilityFixes.CompatibilityFixSubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
+      <Name value="TOR Career Uniques - Tavern Rumors" />
+      <DLLName value="TORCareerUniques.TavernRumors.dll" />
+      <SubModuleClassType value="TORCareerUniques.TavernRumors.TavernRumorSubModule" />
+      <Tags />
+    </SubModule>
+  </SubModules>
+
+</Module>

@@ -1,0 +1,200 @@
+{
+  "GrailDamsel": {
+    "relic": "emp_enchant_azyr_foresight",
+    "pieces": [
+      "bret_blessing_lady_ward",
+      "bret_blessing_mists_sacred_lake",
+      "emp_enchant_ghyran_bloom",
+      "emp_enchant_azyr_divination"
+    ]
+  },
+  "GrailKnight": {
+    "relic": "bret_blessing_grail_legacy",
+    "pieces": [
+      "bret_blessing_lady_ward",
+      "bret_blessing_wisdom_virtue",
+      "bret_blessing_eerie_touch",
+      "bret_blessing_fey_guidance"
+    ]
+  },
+  "MinorVampire": {
+    "relic": "vc_enchant_drinker_blood",
+    "pieces": [
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers",
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers"
+    ]
+  },
+  "WarriorPriest": {
+    "relic": "emp_blessing_sigmar_exorcism",
+    "pieces": [
+      "emp_blessing_sigmar_soulfire",
+      "emp_blessing_sigmar_light",
+      "emp_blessing_sigmar_beacon",
+      "emp_enchant_hysh_sanctuary"
+    ]
+  },
+  "BloodKnight": {
+    "relic": "vc_enchant_drinker_blood",
+    "pieces": [
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers",
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers"
+    ]
+  },
+  "Mercenary": {
+    "relic": "emp_enchant_chamon_crucible",
+    "pieces": [
+      "emp_enchant_ghur_wildform",
+      "emp_enchant_azyr_azure_mirror",
+      "emp_enchant_chamon_feathers_lead",
+      "emp_enchant_azyr_divination"
+    ]
+  },
+  "WitchHunter": {
+    "relic": "emp_blessing_sigmar_exorcism",
+    "pieces": [
+      "emp_blessing_sigmar_soulfire",
+      "emp_blessing_sigmar_light",
+      "emp_blessing_sigmar_beacon",
+      "emp_enchant_hysh_sanctuary"
+    ]
+  },
+  "Necromancer": {
+    "relic": "vc_enchant_call_beyond",
+    "pieces": [
+      "vc_enchant_legacy_arkhan",
+      "vc_enchant_unhallowed_pact",
+      "vc_enchant_secrets_wsoran",
+      "vc_enchant_caress_void"
+    ]
+  },
+  "BlackGrailKnight": {
+    "relic": "vc_enchant_crimson_flood",
+    "pieces": [
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers",
+      "vc_enchant_nightshroud",
+      "vc_enchant_ethereal_whispers"
+    ]
+  },
+  "Necrarch": {
+    "relic": "vc_enchant_crimson_flood",
+    "pieces": [
+      "vc_enchant_secrets_wsoran",
+      "vc_enchant_caress_void",
+      "vc_enchant_legacy_arkhan",
+      "vc_enchant_unhallowed_pact"
+    ]
+  },
+  "WarriorPriestUlric": {
+    "relic": "emp_blessing_ulric_wrath",
+    "pieces": [
+      "emp_blessing_ulric_frenzy",
+      "emp_blessing_ulric_winterfather_gift",
+      "emp_enchant_ghur_wildform",
+      "emp_blessing_ulric_frenzy"
+    ]
+  },
+  "ImperialMagister": {
+    "relic": "emp_enchant_azyr_foresight",
+    "pieces": [
+      "emp_enchant_hysh_providence",
+      "emp_enchant_hysh_clarity",
+      "emp_enchant_shyish_messengers",
+      "emp_enchant_azyr_divination"
+    ]
+  },
+  "Waywatcher": {
+    "relic": "asrai_enchant_anath_raema",
+    "pieces": [
+      "asrai_enchant_embrace_isha",
+      "asrai_enchant_oakhart_blessing",
+      "asrai_enchant_tree_lord",
+      "asrai_enchant_leylines_weave"
+    ]
+  },
+  "Spellsinger": {
+    "relic": "we_enchant_tranquillity_cadai",
+    "pieces": [
+      "asrai_enchant_radiance_woods",
+      "asrai_enchant_embrace_isha",
+      "asrai_enchant_tree_lord",
+      "we_enchant_touch_lileath"
+    ]
+  },
+  "Warden": {
+    "relic": "asrai_enchant_trance_loec",
+    "pieces": [
+      "asrai_enchant_oakhart_blessing",
+      "asrai_enchant_embrace_isha",
+      "asrai_enchant_tree_lord",
+      "asrai_enchant_leylines_weave"
+    ]
+  },
+  "GreyLord": {
+    "relic": "we_enchant_dusk_dawn",
+    "pieces": [
+      "eo_enchant_sanctuary_saphery",
+      "eo_enchant_wisdom_hoeth",
+      "asrai_enchant_dusk_wood",
+      "we_enchant_touch_lileath"
+    ]
+  },
+  "KnightOldWorld": {
+    "relic": "emp_enchant_chamon_crucible",
+    "pieces": [
+      "emp_enchant_chamon_feathers_lead",
+      "emp_enchant_azyr_azure_mirror",
+      "emp_enchant_ghur_wildform",
+      "emp_enchant_azyr_divination"
+    ]
+  },
+  "Ironbreaker": {
+    "relic": "dw_master_rune_adamant",
+    "pieces": [
+      "dw_master_rune_gromril",
+      "dw_master_rune_steel",
+      "dw_master_rune_preservation",
+      "dw_rune_spell_eating"
+    ]
+  },
+  "Slayer": {
+    "relic": "dw_rune_beastslaying",
+    "pieces": [
+      "dw_rune_fortitude",
+      "dw_rune_vigour",
+      "dw_rune_protection",
+      "dw_rune_iron"
+    ]
+  },
+  "Runelord": {
+    "relic": "dw_master_rune_skalf",
+    "pieces": [
+      "dw_master_rune_gromril",
+      "dw_rune_spell_eating",
+      "dw_master_rune_preservation",
+      "dw_master_rune_steel"
+    ]
+  },
+  "OrcBoss": {
+    "relic": "gs_enchant_wallopin_krunch",
+    "pieces": [
+      "gs_enchant_tuffness_gork",
+      "gs_enchant_tuffness_gork",
+      "gs_enchant_call_great_green",
+      "gs_enchant_call_great_green"
+    ]
+  },
+  "OrcShaman": {
+    "relic": "gs_enchant_shadow_bad_moon",
+    "pieces": [
+      "gs_enchant_call_great_green",
+      "gs_enchant_call_great_green",
+      "gs_enchant_tuffness_gork",
+      "gs_enchant_call_great_green"
+    ]
+  }
+}

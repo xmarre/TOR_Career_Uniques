@@ -1,0 +1,102 @@
+name: Build and release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '8.0.x'
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          [xml]$module = Get-Content ./Modules/TORCareerUniques/SubModule.xml
+          $version = ([string]$module.Module.Version.value).TrimStart('v')
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw 'SubModule.xml has no module version.'
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match module version 'v$version'."
+          }
+          if ($env:GITHUB_REF -eq 'refs/heads/main' -and $env:GITHUB_EVENT_NAME -eq 'push') {
+            $message = '${{ github.event.head_commit.message }}'
+            if ($message.StartsWith('Release v') -and $message -ne "Release v$version") {
+              throw "Release commit '$message' does not match module version 'v$version'."
+            }
+          }
+      - name: Verify and build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ./artifacts/logs | Out-Null
+          try {
+            & ./scripts/Build.ps1 -Configuration Release *>&1 | Tee-Object -FilePath ./artifacts/logs/build.log
+          }
+          catch {
+            $_ | Out-String | Tee-Object -FilePath ./artifacts/logs/build.log -Append
+            exit 1
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TORCareerUniques-build-log
+          path: artifacts/logs/build.log
+          if-no-files-found: warn
+      - name: Package release archives
+        shell: pwsh
+        run: ./scripts/Pack-Release.ps1 -Configuration Release -SkipBuild
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TORCareerUniques-release
+          path: artifacts/release/*
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: TORCareerUniques-release
+          path: artifacts/release
+      - name: Publish version tag and GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/.*<Version value="v\([0-9][0-9.]*\)".*/\1/p' Modules/TORCareerUniques/SubModule.xml)
+          test -n "$version"
+          tag="v$version"
+          test "${{ github.event.head_commit.message }}" = "Release $tag"
+
+          if existing_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
+            test "$existing_sha" = "$GITHUB_SHA"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it unchanged."
+          else
+            gh release create "$tag" artifacts/release/* --title "TOR Career Uniques $tag" --notes-file RELEASE_NOTES.md --verify-tag
+          fi

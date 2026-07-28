@@ -1,15 +1,8 @@
+artifacts/
 **/bin/
 **/obj/
-dist/
-artifacts/
+.vs/
+.idea/
 *.user
 *.suo
-*.pdb
 *.log
-TORCareerUniques.settings.ini
-.DS_Store
-Thumbs.db
-
-# Keep the finished runtime module in version control.
-!Modules/TORCareerUniques/bin/
-!Modules/TORCareerUniques/bin/**
