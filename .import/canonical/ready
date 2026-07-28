@@ -1,2 +1,2 @@
-Import the complete verified canonical v1.7.29 source tree through the default-branch bootstrap workflow.
-Trigger: 2026-07-28T10:44:00Z
+Import the complete verified canonical v1.7.29 source tree with exact failure diagnostics.
+Trigger: 2026-07-28T10:48:00Z
