@@ -1,99 +1,13 @@
 name: Bootstrap repository rebuild
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 jobs:
-  rebuild:
-    if: github.head_ref == 'repo-rebuild-v1.7.29'
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: repo-rebuild-v1.7.29
-          fetch-depth: 0
-      - name: Import canonical repository tree
-        shell: bash
-        run: |
-          set -u
-          expected='40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5'
-          archive=/tmp/TORCareerUniques-v1.7.29-source.tar.xz
-          diagnostic=.import/canonical/IMPORT_DIAGNOSTIC.txt
-          rm -f "$diagnostic"
-
-          record_failure() {
-            phase="$1"
-            shift
-            {
-              echo "phase=$phase"
-              printf '%s\n' "$@"
-              if [ "${#chunks[@]}" -gt 0 ]; then
-                echo 'chunk_inventory:'
-                for file in "${chunks[@]}"; do
-                  printf '%s %s %s\n' "$(stat -c %s "$file")" "$(git hash-object "$file")" "$file"
-                done
-              fi
-              if [ -f "$archive" ]; then
-                echo "archive_sha256=$(sha256sum "$archive" | awk '{print $1}')"
-                echo "archive_bytes=$(stat -c %s "$archive")"
-              fi
-            } > "$diagnostic"
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add "$diagnostic"
-            git commit -m "Record canonical import failure: $phase"
-            git push origin HEAD:repo-rebuild-v1.7.29
-            exit 1
-          }
-
-          chunks=()
-          if [ -f TORCareerUniques.sln ] && [ -f SOURCE_MANIFEST.sha256 ] && [ ! -d .import ]; then
-            sha256sum --check --strict SOURCE_MANIFEST.sha256 || exit 1
-            pwsh -NoProfile -File scripts/Verify-Source.ps1 || exit 1
-            echo 'Canonical repository tree is already present.'
-            exit 0
-          fi
-
-          mapfile -t chunks < <(find .import/canonical -maxdepth 1 -type f -name 'part-*.txt' | sort)
-          test "${#chunks[@]}" -gt 0 || record_failure chunk-discovery 'No canonical payload chunks found.'
-          cat "${chunks[@]}" | base64 --decode > "$archive" || record_failure base64-decode "chunk_count=${#chunks[@]}" "chunks=$(printf '%s ' "${chunks[@]}")"
-          actual=$(sha256sum "$archive" | awk '{print $1}')
-          [ "$actual" = "$expected" ] || record_failure archive-hash "expected=$expected" "actual=$actual" "chunk_count=${#chunks[@]}" "chunks=$(printf '%s ' "${chunks[@]}")"
-          xz --test "$archive" || record_failure xz-test
-
-          rm -rf /tmp/torcu-canonical
-          mkdir -p /tmp/torcu-canonical
-          tar -xJf "$archive" -C /tmp/torcu-canonical || record_failure extract
-          source_root=/tmp/torcu-canonical
-          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
-            mapfile -t roots < <(find /tmp/torcu-canonical -type f -name TORCareerUniques.sln -printf '%h\n')
-            [ "${#roots[@]}" -eq 1 ] || record_failure source-root "resolved_roots=${#roots[@]}"
-            source_root="${roots[0]}"
-          fi
-
-          test -f "$source_root/TORCareerUniques.sln" || record_failure source-tree 'Missing solution.'
-          test -f "$source_root/SOURCE_MANIFEST.sha256" || record_failure source-tree 'Missing manifest.'
-          test -f "$source_root/src/TORCareerUniques/SetItemRuntime.cs" || record_failure source-tree 'Missing v1.7.29 resolver source.'
-          (
-            cd "$source_root"
-            sha256sum --check --strict SOURCE_MANIFEST.sha256
-          ) >/tmp/manifest-output.txt 2>&1 || record_failure source-manifest "$(tail -200 /tmp/manifest-output.txt)"
-          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1" >/tmp/verify-output.txt 2>&1 || record_failure source-verifier "$(tail -200 /tmp/verify-output.txt)"
-
-          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
-          [ -z "$forbidden" ] || record_failure forbidden-artifacts "$forbidden"
-
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$source_root/." .
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all
-          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
-          git push origin HEAD:repo-rebuild-v1.7.29
+      - run: echo 'Automatic bootstrap disabled after payload reconstruction.'
