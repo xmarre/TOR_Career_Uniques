@@ -1,7 +1,7 @@
 phase=archive-hash
 expected=40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5
-actual=aa827dda5ef5a6c07ab5086247abf94a0e3f0ac33cd153351214479893047df5
-chunk_count=25
-chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
-archive_sha256=aa827dda5ef5a6c07ab5086247abf94a0e3f0ac33cd153351214479893047df5
-archive_bytes=172551
+actual=2643c71762e813919eb29183b5eda75d3d11f4b3d7dddea0c27a118f2269f15d
+chunk_count=26
+chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016a0.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
+archive_sha256=2643c71762e813919eb29183b5eda75d3d11f4b3d7dddea0c27a118f2269f15d
+archive_bytes=174051
