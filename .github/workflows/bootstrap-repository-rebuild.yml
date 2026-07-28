@@ -13,180 +13,43 @@ jobs:
   rebuild:
     if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
-      - name: Repair and validate canonical transport
+      - name: Import canonical repository tree
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .import/diagnostic.txt
-          python3 - <<'PY' > /tmp/repair-report.txt
-          import base64, glob, hashlib, heapq, lzma, pathlib, string
 
-          alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
-          allowed = set(alphabet + '=')
-
-          def clean(name):
-              raw = pathlib.Path(name).read_text(encoding='utf-8-sig')
-              return ''.join(ch for ch in raw if ch in allowed)
-
-          names = sorted(glob.glob('bootstrap2/part.*')) + sorted(glob.glob('bootstrap2/tail.*'))
-          original = ''.join(clean(name) for name in names)
-
-          def decode_lenient(text):
-              core = text.rstrip('=')
-              core += 'A' * ((-len(core)) % 4)
-              return base64.b64decode(core, validate=True)
-
-          def score(text, block=512):
-              try:
-                  data = decode_lenient(text)
-              except Exception:
-                  return -1, None
-              decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-              pos = 0
-              try:
-                  while pos < len(data):
-                      end = min(pos + block, len(data))
-                      decoder.decompress(data[pos:end])
-                      pos = end
-                      if decoder.eof:
-                          try:
-                              payload = base64.b64decode(text, validate=True)
-                              lzma.decompress(payload, format=lzma.FORMAT_XZ)
-                              return len(data) + 100_000_000, payload
-                          except Exception:
-                              return pos, None
-              except lzma.LZMAError:
-                  return pos, None
-              return len(data), None
-
-          def best_insertions(text, base_score, parent_edits, beam_per_state=18):
-              center = base_score * 4 // 3
-              lo = max(0, center - 640)
-              hi = min(len(text), center + 96)
-              coarse_heap = []
-              for position in range(lo, hi + 1, 8):
-                  for char in alphabet:
-                      candidate = text[:position] + char + text[position:]
-                      value, payload = score(candidate, block=512)
-                      if payload is not None:
-                          return [(value, candidate, parent_edits + [(position, char)], payload)]
-                      item = (value, position, char)
-                      if len(coarse_heap) < 28:
-                          heapq.heappush(coarse_heap, item)
-                      elif item > coarse_heap[0]:
-                          heapq.heapreplace(coarse_heap, item)
-
-              refine_positions = set()
-              for _, position, _ in sorted(coarse_heap, reverse=True)[:16]:
-                  for p in range(max(lo, position - 8), min(hi, position + 8) + 1):
-                      refine_positions.add(p)
-
-              refined_heap = []
-              for position in sorted(refine_positions):
-                  for char in alphabet:
-                      candidate = text[:position] + char + text[position:]
-                      value, payload = score(candidate, block=128)
-                      edits = parent_edits + [(position, char)]
-                      if payload is not None:
-                          return [(value, candidate, edits, payload)]
-                      item = (value, position, char, candidate, edits)
-                      if len(refined_heap) < beam_per_state:
-                          heapq.heappush(refined_heap, item)
-                      elif item[:3] > refined_heap[0][:3]:
-                          heapq.heapreplace(refined_heap, item)
-              return [(value, candidate, edits, None) for value, _, _, candidate, edits in sorted(refined_heap, reverse=True)]
-
-          initial_score, initial_payload = score(original, block=32)
-          print(f'initial_length={len(original)} initial_score={initial_score}')
-          beam = [(initial_score, original, [], initial_payload)]
-          winner = None
-
-          for depth in range(1, 4):
-              next_states = []
-              for state_index, (state_score, text, edits, payload) in enumerate(beam):
-                  if payload is not None:
-                      winner = (state_score, text, edits, payload)
-                      break
-                  results = best_insertions(text, state_score, edits)
-                  for result in results:
-                      if result[3] is not None:
-                          winner = result
-                          break
-                      next_states.append(result)
-                  if winner is not None:
-                      break
-              if winner is not None:
-                  break
-
-              unique = {}
-              for state in sorted(next_states, key=lambda item: item[0], reverse=True):
-                  key = tuple(state[2])
-                  unique.setdefault(key, state)
-              beam = list(unique.values())[:10]
-              print(f'depth={depth} beam={len(beam)}')
-              for rank, state in enumerate(beam[:10], 1):
-                  print(f'  rank={rank} score={state[0]} edits={state[2]}')
-
-          if winner is None:
-              print('repair_result=not_found')
-              raise SystemExit(2)
-
-          value, repaired_text, edits, payload = winner
-          digest = hashlib.sha256(payload).hexdigest()
-          pathlib.Path('/tmp/TORCareerUniques-source.tar.xz').write_bytes(payload)
-          print(f'repair_result=success score={value} edits={edits}')
-          print(f'archive_bytes={len(payload)} archive_sha256={digest}')
-          PY
-          repair_status=$?
-          if [ "$repair_status" -ne 0 ]; then
-            {
-              echo 'phase=beam-repair'
-              cat /tmp/repair-report.txt
-            } > .import/diagnostic.txt
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add .import/diagnostic.txt
-            git commit -m 'Record bounded transport repair result'
-            git push origin HEAD:repo-rebuild-v1.7.29
-            exit 1
+          if [ -f TORCareerUniques.sln ] && [ -f SOURCE_MANIFEST.sha256 ] && [ ! -d .import ]; then
+            pwsh -NoProfile -File scripts/Verify-Source.ps1
+            echo 'Canonical repository tree is already present.'
+            exit 0
           fi
 
-          xz --test /tmp/TORCareerUniques-source.tar.xz
-          rm -rf /tmp/torcu-unpack
-          mkdir -p /tmp/torcu-unpack
-          tar -xJf /tmp/TORCareerUniques-source.tar.xz -C /tmp/torcu-unpack
-          source_root=/tmp/torcu-unpack
-          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
-            mapfile -t roots < <(find /tmp/torcu-unpack -type f -name TORCareerUniques.sln -printf '%h\n')
-            test "${#roots[@]}" -eq 1
-            source_root="${roots[0]}"
-          fi
+          test -d .import
+          mapfile -t chunks < <(find .import -maxdepth 1 -type f -name 'chunk-*' | sort)
+          test "${#chunks[@]}" -eq 7
+          cat "${chunks[@]}" > /tmp/TORCareerUniques-v1.7.29-source.tar.xz
+          echo '378982d02743289ee06abdb14555b6c19cfabf259c412adf414ece4f93f9975b  /tmp/TORCareerUniques-v1.7.29-source.tar.xz' | sha256sum --check --strict
+          xz --test /tmp/TORCareerUniques-v1.7.29-source.tar.xz
 
-          install -m 0644 .import/overrides/Directory.Build.props "$source_root/Directory.Build.props"
-          install -m 0644 .import/overrides/Pack-Release.ps1 "$source_root/scripts/Pack-Release.ps1"
-          install -m 0644 .import/overrides/build-release.yml "$source_root/.github/workflows/build-release.yml"
-          install -m 0644 .import/overrides/SOURCE_MANIFEST.sha256 "$source_root/SOURCE_MANIFEST.sha256"
-          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
+          rm -rf /tmp/torcu-canonical
+          mkdir -p /tmp/torcu-canonical
+          tar -xJf /tmp/TORCareerUniques-v1.7.29-source.tar.xz -C /tmp/torcu-canonical
+          test -f /tmp/torcu-canonical/TORCareerUniques.sln
+          test -f /tmp/torcu-canonical/SOURCE_MANIFEST.sha256
+          test -f /tmp/torcu-canonical/src/TORCareerUniques/SetItemRuntime.cs
+          pwsh -NoProfile -File /tmp/torcu-canonical/scripts/Verify-Source.ps1
 
-          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/.import/*' -o -path '*/bootstrap*/*' \) | sort)
+          forbidden=$(find /tmp/torcu-canonical -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
           test -z "$forbidden"
 
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$source_root/." .
-          test -f TORCareerUniques.sln
-          test -f SOURCE_MANIFEST.sha256
-          test -f src/TORCareerUniques/SetItemRuntime.cs
-          cp /tmp/repair-report.txt /tmp/final-repair-report.txt
-      - name: Commit canonical repository
-        shell: bash
-        run: |
-          set -euo pipefail
+          cp -a /tmp/torcu-canonical/. .
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add --all
