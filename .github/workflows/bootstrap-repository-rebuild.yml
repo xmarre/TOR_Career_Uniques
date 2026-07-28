@@ -67,6 +67,7 @@ jobs:
           source_root=$(cat /tmp/torcu-source-root)
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "$source_root/." .
+          rm -f .github/workflows/build-release.yml
           test -f TORCareerUniques.sln
           test -f SOURCE_MANIFEST.sha256
           git status --short
