@@ -14,7 +14,7 @@ jobs:
     if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: repo-rebuild-v1.7.29
           fetch-depth: 0
@@ -24,31 +24,42 @@ jobs:
           set -euo pipefail
 
           if [ -f TORCareerUniques.sln ] && [ -f SOURCE_MANIFEST.sha256 ] && [ ! -d .import ]; then
+            sha256sum --check --strict SOURCE_MANIFEST.sha256
             pwsh -NoProfile -File scripts/Verify-Source.ps1
             echo 'Canonical repository tree is already present.'
             exit 0
           fi
 
-          test -d .import
-          mapfile -t chunks < <(find .import -maxdepth 1 -type f -name 'chunk-*.txt' | sort)
-          test "${#chunks[@]}" -eq 37
-          cat "${chunks[@]}" | tr -d '\r\n\t ' | base64 --decode > /tmp/TORCareerUniques-v1.7.29-source.tar.xz
-          echo '378982d02743289ee06abdb14555b6c19cfabf259c412adf414ece4f93f9975b  /tmp/TORCareerUniques-v1.7.29-source.tar.xz' | sha256sum --check --strict
+          mapfile -t chunks < <(find .import/canonical -maxdepth 1 -type f -name 'part-*.txt' | sort)
+          test "${#chunks[@]}" -gt 0
+          cat "${chunks[@]}" | base64 --decode > /tmp/TORCareerUniques-v1.7.29-source.tar.xz
+          echo '40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5  /tmp/TORCareerUniques-v1.7.29-source.tar.xz' | sha256sum --check --strict
           xz --test /tmp/TORCareerUniques-v1.7.29-source.tar.xz
 
           rm -rf /tmp/torcu-canonical
           mkdir -p /tmp/torcu-canonical
           tar -xJf /tmp/TORCareerUniques-v1.7.29-source.tar.xz -C /tmp/torcu-canonical
-          test -f /tmp/torcu-canonical/TORCareerUniques.sln
-          test -f /tmp/torcu-canonical/SOURCE_MANIFEST.sha256
-          test -f /tmp/torcu-canonical/src/TORCareerUniques/SetItemRuntime.cs
-          pwsh -NoProfile -File /tmp/torcu-canonical/scripts/Verify-Source.ps1
+          source_root=/tmp/torcu-canonical
+          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
+            mapfile -t roots < <(find /tmp/torcu-canonical -type f -name TORCareerUniques.sln -printf '%h\n')
+            test "${#roots[@]}" -eq 1
+            source_root="${roots[0]}"
+          fi
 
-          forbidden=$(find /tmp/torcu-canonical -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
+          test -f "$source_root/TORCareerUniques.sln"
+          test -f "$source_root/SOURCE_MANIFEST.sha256"
+          test -f "$source_root/src/TORCareerUniques/SetItemRuntime.cs"
+          (
+            cd "$source_root"
+            sha256sum --check --strict SOURCE_MANIFEST.sha256
+          )
+          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
+
+          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
           test -z "$forbidden"
 
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a /tmp/torcu-canonical/. .
+          cp -a "$source_root/." .
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
