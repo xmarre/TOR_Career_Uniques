@@ -37,7 +37,23 @@ jobs:
           }
       - name: Verify and build
         shell: pwsh
-        run: ./scripts/Build.ps1 -Configuration Release
+        run: |
+          New-Item -ItemType Directory -Force ./artifacts/logs | Out-Null
+          try {
+            & ./scripts/Build.ps1 -Configuration Release *>&1 | Tee-Object -FilePath ./artifacts/logs/build.log
+          }
+          catch {
+            $_ | Out-String | Tee-Object -FilePath ./artifacts/logs/build.log -Append
+            exit 1
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TORCareerUniques-build-log
+          path: artifacts/logs/build.log
+          if-no-files-found: warn
       - name: Package release archives
         shell: pwsh
         run: ./scripts/Pack-Release.ps1 -Configuration Release -SkipBuild
