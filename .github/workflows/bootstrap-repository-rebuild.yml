@@ -33,6 +33,12 @@ jobs:
             {
               echo "phase=$phase"
               printf '%s\n' "$@"
+              if [ "${#chunks[@]}" -gt 0 ]; then
+                echo 'chunk_inventory:'
+                for file in "${chunks[@]}"; do
+                  printf '%s %s %s\n' "$(stat -c %s "$file")" "$(git hash-object "$file")" "$file"
+                done
+              fi
               if [ -f "$archive" ]; then
                 echo "archive_sha256=$(sha256sum "$archive" | awk '{print $1}')"
                 echo "archive_bytes=$(stat -c %s "$archive")"
@@ -46,6 +52,7 @@ jobs:
             exit 1
           }
 
+          chunks=()
           if [ -f TORCareerUniques.sln ] && [ -f SOURCE_MANIFEST.sha256 ] && [ ! -d .import ]; then
             sha256sum --check --strict SOURCE_MANIFEST.sha256 || exit 1
             pwsh -NoProfile -File scripts/Verify-Source.ps1 || exit 1
