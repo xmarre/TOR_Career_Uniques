@@ -30,9 +30,9 @@ jobs:
           fi
 
           test -d .import
-          mapfile -t chunks < <(find .import -maxdepth 1 -type f -name 'chunk-*' | sort)
-          test "${#chunks[@]}" -eq 7
-          cat "${chunks[@]}" > /tmp/TORCareerUniques-v1.7.29-source.tar.xz
+          mapfile -t chunks < <(find .import -maxdepth 1 -type f -name 'chunk-*.txt' | sort)
+          test "${#chunks[@]}" -eq 37
+          cat "${chunks[@]}" | tr -d '\r\n\t ' | base64 --decode > /tmp/TORCareerUniques-v1.7.29-source.tar.xz
           echo '378982d02743289ee06abdb14555b6c19cfabf259c412adf414ece4f93f9975b  /tmp/TORCareerUniques-v1.7.29-source.tar.xz' | sha256sum --check --strict
           xz --test /tmp/TORCareerUniques-v1.7.29-source.tar.xz
 
