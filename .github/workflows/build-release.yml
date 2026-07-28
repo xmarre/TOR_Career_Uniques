@@ -20,6 +20,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Validate release version
         shell: pwsh
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           [xml]$module = Get-Content ./Modules/TORCareerUniques/SubModule.xml
           $version = ([string]$module.Module.Version.value).TrimStart('v')
@@ -30,9 +32,9 @@ jobs:
             throw "Tag '$env:GITHUB_REF_NAME' does not match module version 'v$version'."
           }
           if ($env:GITHUB_REF -eq 'refs/heads/main' -and $env:GITHUB_EVENT_NAME -eq 'push') {
-            $message = '${{ github.event.head_commit.message }}'
-            if ($message.StartsWith('Release v') -and $message -ne "Release v$version") {
-              throw "Release commit '$message' does not match module version 'v$version'."
+            $subject = (([string]$env:COMMIT_MESSAGE -split "`r?`n", 2)[0]).Trim()
+            if ($subject.StartsWith('Release v') -and $subject -ne "Release v$version") {
+              throw "Release commit '$subject' does not match module version 'v$version'."
             }
           }
       - name: Verify and build
@@ -82,12 +84,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           version=$(sed -n 's/.*<Version value="v\([0-9][0-9.]*\)".*/\1/p' Modules/TORCareerUniques/SubModule.xml)
           test -n "$version"
           tag="v$version"
-          test "${{ github.event.head_commit.message }}" = "Release $tag"
+          commit_subject=$(printf '%s\n' "$COMMIT_MESSAGE" | sed -n '1p' | tr -d '\r')
+          test "$commit_subject" = "Release $tag"
 
           if existing_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
             test "$existing_sha" = "$GITHUB_SHA"
