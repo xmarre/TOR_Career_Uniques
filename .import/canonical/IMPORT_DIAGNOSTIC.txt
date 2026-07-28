@@ -1,5 +1,7 @@
-phase=base64-decode
-chunk_count=26
-chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016a.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
-archive_sha256=54a8dd153b55882f706c04dd6e657ae0ee043b53645a24a3b952320431911e32
-archive_bytes=181551
+phase=archive-hash
+expected=40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5
+actual=aa827dda5ef5a6c07ab5086247abf94a0e3f0ac33cd153351214479893047df5
+chunk_count=25
+chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016b.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
+archive_sha256=aa827dda5ef5a6c07ab5086247abf94a0e3f0ac33cd153351214479893047df5
+archive_bytes=172551
