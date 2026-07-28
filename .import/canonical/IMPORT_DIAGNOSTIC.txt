@@ -1,7 +1,5 @@
-phase=archive-hash
-expected=40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5
-actual=211dd4ef8d58c7425ba9afc1717689e7926221107c27a4c8cc06db448b39c5a5
-chunk_count=24
-chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
-archive_sha256=211dd4ef8d58c7425ba9afc1717689e7926221107c27a4c8cc06db448b39c5a5
-archive_bytes=168051
+phase=base64-decode
+chunk_count=25
+chunks=.import/canonical/part-000.txt .import/canonical/part-001.txt .import/canonical/part-002.txt .import/canonical/part-003.txt .import/canonical/part-004.txt .import/canonical/part-005.txt .import/canonical/part-006.txt .import/canonical/part-007a.txt .import/canonical/part-007b.txt .import/canonical/part-008a.txt .import/canonical/part-008b.txt .import/canonical/part-009a.txt .import/canonical/part-009b1.txt .import/canonical/part-009b2.txt .import/canonical/part-010a.txt .import/canonical/part-010b.txt .import/canonical/part-011a.txt .import/canonical/part-011b.txt .import/canonical/part-012.txt .import/canonical/part-013.txt .import/canonical/part-014.txt .import/canonical/part-015.txt .import/canonical/part-016a.txt .import/canonical/part-017.txt .import/canonical/part-018.txt 
+archive_sha256=e9c812aedb3e78928f0dc8bee33e8f084e92866be9d703a72f84010e64bdac8a
+archive_bytes=177051
