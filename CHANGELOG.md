@@ -1,11 +1,19 @@
 # Changelog
 
+## 1.7.30
+
+- Made encounter-hero creation transactional for every career.
+- Added a finalizer-backed rollback around the shared `GetOrCreateEncounterHero` path so any exception during career, equipment, validation, or placement setup cannot leave a newly created hero registered in persistent state.
+- Restores the pre-call encounter and successor mappings, clears pending recovery state, and unregisters failed heroes from the forced-death guard.
+- Removes failed temporary heroes through Bannerlord's native removal action, with native hero disabling as a verified fallback.
+- Preserved existing validated heroes and all career-specific equipment, culture, role, exact-slot, and caster-weight rules.
+
 ## 1.7.29
 
-- Fixed a save-loading crash caused by incomplete GreyLord encounter-hero initialization.
-- Added the bounded culture/role catalogue resolver when matched CharacterObject outfits cannot satisfy every required slot and the caster armour-weight cap.
-- Fixed `Cowl of Unremembered Faces` failing to resolve an exact-slot visual base item in that fallback path.
-- Prevented partially initialized GreyLord heroes from reaching Bannerlord's load-finalization validation.
+- Fixed a general save-loading failure caused when an encounter career's matched TOR archetype outfits could not produce a complete, slot-valid loadout within the applicable armour-weight limit.
+- Added the bounded culture/role catalogue resolver for every career using the shared outfit-resolution path.
+- Fixed the Grey Lord's `Cowl of Unremembered Faces` as the confirmed data path that exposed the general resolver defect.
+- Prevented that resolver failure from leaving an incomplete encounter hero for Bannerlord's load-finalization validation.
 - Preserved the 11-weight caster cap, culture/role filtering, exact-slot checks, and native equipment validation.
 - Rebuilt the repository from the canonical v1.7.28 source and removed historical validation reports, investigations, emergency binary-patch scripts, and transport artefacts.
 
