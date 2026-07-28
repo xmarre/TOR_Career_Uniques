@@ -1,13 +1,64 @@
 name: Bootstrap repository rebuild
 
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: read
 
 jobs:
-  disabled:
+  rebuild:
+    if: github.head_ref == 'repo-rebuild-v1.7.29'
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Automatic bootstrap disabled after payload reconstruction.'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: repo-rebuild-v1.7.29
+          fetch-depth: 0
+      - name: Import canonical repository tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5'
+          archive=/tmp/TORCareerUniques-v1.7.29-source.tar.xz
+
+          mapfile -t chunks < <(find .import/canonical -maxdepth 1 -type f -name 'part-*.txt' | sort)
+          test "${#chunks[@]}" -gt 0
+          cat "${chunks[@]}" | base64 --decode > "$archive"
+          actual=$(sha256sum "$archive" | awk '{print $1}')
+          test "$actual" = "$expected"
+          xz --test "$archive"
+
+          rm -rf /tmp/torcu-canonical
+          mkdir -p /tmp/torcu-canonical
+          tar -xJf "$archive" -C /tmp/torcu-canonical
+          source_root=/tmp/torcu-canonical
+          if [ ! -f "$source_root/TORCareerUniques.sln" ]; then
+            mapfile -t roots < <(find /tmp/torcu-canonical -type f -name TORCareerUniques.sln -printf '%h\n')
+            test "${#roots[@]}" -eq 1
+            source_root="${roots[0]}"
+          fi
+
+          test -f "$source_root/TORCareerUniques.sln"
+          test -f "$source_root/SOURCE_MANIFEST.sha256"
+          test -f "$source_root/src/TORCareerUniques/SetItemRuntime.cs"
+          (
+            cd "$source_root"
+            sha256sum --check --strict SOURCE_MANIFEST.sha256
+          )
+          pwsh -NoProfile -File "$source_root/scripts/Verify-Source.ps1"
+
+          forbidden=$(find "$source_root" -type f \( -iname 'VALIDATION*' -o -iname '*INVESTIGATION*' -o -iname '*PatchCompatibilityFixes*' -o -path '*/bootstrap*/*' -o -path '*/.import/*' \) -print)
+          test -z "$forbidden"
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$source_root/." .
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Rebuild repository from v1.7.28 and apply v1.7.29'
+          git push origin HEAD:repo-rebuild-v1.7.29
