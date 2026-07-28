@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t chunks < <(find .import/canonical -maxdepth 1 -type f -name 'part-*.txt' | sort)
-          test "${#chunks[@]}" -eq 19
+          test "${#chunks[@]}" -eq 10
           cat "${chunks[@]}" | base64 --decode > /tmp/TORCareerUniques-v1.7.29-canonical.tar.xz
           echo '40cddb5805a0bca7107d40abfc068187709e3a62a65a26a07b539753b31ddca5  /tmp/TORCareerUniques-v1.7.29-canonical.tar.xz' | sha256sum --check --strict
           xz --test /tmp/TORCareerUniques-v1.7.29-canonical.tar.xz
