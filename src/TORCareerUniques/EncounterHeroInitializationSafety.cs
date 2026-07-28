@@ -29,8 +29,12 @@ namespace TORCareerUniques
         private sealed class EncounterHeroCreationState
         {
             internal string CareerId;
+            internal bool EncounterHeroKeyExistedBefore;
             internal Hero EncounterHeroBefore;
+            internal bool SuccessorHeroKeyExistedBefore;
             internal Hero SuccessorHeroBefore;
+            internal bool PendingRecoveryExistedBefore;
+            internal string PendingRecoveryBefore;
         }
 
         private static bool InstallEncounterHeroInitializationSafety()
@@ -44,16 +48,16 @@ namespace TORCareerUniques
                     "HarmonyLib is unavailable while installing encounter-hero initialization safety.");
 
             MethodInfo original = typeof(UniqueEncounterBehavior).GetMethod(
-                "GetOrCreateEncounterHero",
+                nameof(GetOrCreateEncounterHero),
                 BindingFlags.NonPublic | BindingFlags.Instance,
                 null,
                 new[] { typeof(EncounterDefinition), typeof(Settlement), typeof(Clan) },
                 null);
             MethodInfo prefix = typeof(UniqueEncounterBehavior).GetMethod(
-                "CaptureEncounterHeroCreationState",
+                nameof(CaptureEncounterHeroCreationState),
                 BindingFlags.NonPublic | BindingFlags.Static);
             MethodInfo finalizer = typeof(UniqueEncounterBehavior).GetMethod(
-                "RollbackFailedEncounterHeroCreation",
+                nameof(RollbackFailedEncounterHeroCreation),
                 BindingFlags.NonPublic | BindingFlags.Static);
             if (original == null || prefix == null || finalizer == null)
                 throw new MissingMethodException(
@@ -78,12 +82,28 @@ namespace TORCareerUniques
 
             __state.CareerId = __0.CareerId;
             Hero existing;
-            if (__instance._encounterHeroes != null &&
-                __instance._encounterHeroes.TryGetValue(__0.CareerId, out existing))
+            if (__instance._encounterHeroes != null)
+            {
+                __state.EncounterHeroKeyExistedBefore =
+                    __instance._encounterHeroes.TryGetValue(
+                        __0.CareerId, out existing);
                 __state.EncounterHeroBefore = existing;
-            if (__instance._successorHeroes != null &&
-                __instance._successorHeroes.TryGetValue(__0.CareerId, out existing))
+            }
+            if (__instance._successorHeroes != null)
+            {
+                __state.SuccessorHeroKeyExistedBefore =
+                    __instance._successorHeroes.TryGetValue(
+                        __0.CareerId, out existing);
                 __state.SuccessorHeroBefore = existing;
+            }
+            if (__instance._pendingHeroRecoveries != null)
+            {
+                string pending;
+                __state.PendingRecoveryExistedBefore =
+                    __instance._pendingHeroRecoveries.TryGetValue(
+                        __0.CareerId, out pending);
+                __state.PendingRecoveryBefore = pending;
+            }
         }
 
         private static Exception RollbackFailedEncounterHeroCreation(
@@ -98,11 +118,13 @@ namespace TORCareerUniques
             {
                 List<Hero> failedHeroes = new List<Hero>();
                 RestoreHeroMapAfterFailedCreation(__instance._encounterHeroes,
-                    __state.CareerId, __state.EncounterHeroBefore, failedHeroes);
+                    __state.CareerId, __state.EncounterHeroKeyExistedBefore,
+                    __state.EncounterHeroBefore, failedHeroes);
                 RestoreHeroMapAfterFailedCreation(__instance._successorHeroes,
-                    __state.CareerId, __state.SuccessorHeroBefore, failedHeroes);
-                if (__instance._pendingHeroRecoveries != null)
-                    __instance._pendingHeroRecoveries.Remove(__state.CareerId);
+                    __state.CareerId, __state.SuccessorHeroKeyExistedBefore,
+                    __state.SuccessorHeroBefore, failedHeroes);
+                RestorePendingRecoveryAfterFailedCreation(__instance,
+                    __state);
 
                 for (int i = 0; i < failedHeroes.Count; i++)
                     RemoveFailedEncounterHero(__state.CareerId, failedHeroes[i]);
@@ -123,26 +145,47 @@ namespace TORCareerUniques
         }
 
         private static void RestoreHeroMapAfterFailedCreation(
-            Dictionary<string, Hero> heroMap, string careerId, Hero previousHero,
+            Dictionary<string, Hero> heroMap, string careerId,
+            bool keyExistedBefore, Hero previousHero,
             List<Hero> failedHeroes)
         {
             if (heroMap == null)
                 return;
 
             Hero currentHero;
-            if (!heroMap.TryGetValue(careerId, out currentHero) ||
-                currentHero == null || Object.ReferenceEquals(currentHero, previousHero))
-                return;
+            bool keyExistsNow = heroMap.TryGetValue(careerId,
+                out currentHero);
+            if (keyExistsNow && currentHero != null &&
+                !Object.ReferenceEquals(currentHero, previousHero))
+            {
+                bool alreadyRecorded = false;
+                for (int i = 0; i < failedHeroes.Count; i++)
+                    if (Object.ReferenceEquals(failedHeroes[i], currentHero))
+                    {
+                        alreadyRecorded = true;
+                        break;
+                    }
+                if (!alreadyRecorded)
+                    failedHeroes.Add(currentHero);
+            }
 
-            if (previousHero == null)
-                heroMap.Remove(careerId);
-            else
+            if (keyExistedBefore)
                 heroMap[careerId] = previousHero;
+            else
+                heroMap.Remove(careerId);
+        }
 
-            for (int i = 0; i < failedHeroes.Count; i++)
-                if (Object.ReferenceEquals(failedHeroes[i], currentHero))
-                    return;
-            failedHeroes.Add(currentHero);
+        private static void RestorePendingRecoveryAfterFailedCreation(
+            UniqueEncounterBehavior behavior,
+            EncounterHeroCreationState state)
+        {
+            if (behavior._pendingHeroRecoveries == null)
+                return;
+            if (state.PendingRecoveryExistedBefore)
+                behavior._pendingHeroRecoveries[state.CareerId] =
+                    state.PendingRecoveryBefore;
+            else
+                behavior._pendingHeroRecoveries.Remove(state.CareerId);
         }
 
         private static void RemoveFailedEncounterHero(string careerId, Hero hero)
