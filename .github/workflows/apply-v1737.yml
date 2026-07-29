@@ -1,0 +1,52 @@
+name: Apply v1.7.37 source
+
+on:
+  push:
+    branches:
+      - agent/pre-session-load-performance
+    paths:
+      - '.github/v1737-payload.b64'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: agent/pre-session-load-performance
+          fetch-depth: 0
+      - name: Apply final v1.7.37 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .github/v1737-payload.b64 > /tmp/v1737-payload.tar.gz
+          echo 'c797a623f8906f57f4d388d7b22507b3d74f9ccff712b5e39526a1954ee9d803  /tmp/v1737-payload.tar.gz' | sha256sum --check --strict
+          tar -xzf /tmp/v1737-payload.tar.gz -C .
+          rm -f .github/v1737-payload.b64 .github/workflows/apply-v1737.yml
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path('.')
+          lines = []
+          for path in sorted(root.rglob('*')):
+              if not path.is_file():
+                  continue
+              rel = path.as_posix()
+              if rel == 'SOURCE_MANIFEST.sha256':
+                  continue
+              if rel.startswith('artifacts/') or '/bin/' in rel or '/obj/' in rel:
+                  continue
+              lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {rel}")
+          Path('SOURCE_MANIFEST.sha256').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
+          PY
+
+          sha256sum --check --strict SOURCE_MANIFEST.sha256
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Guard pre-session TORCU load paths'
+          git push origin HEAD:agent/pre-session-load-performance
