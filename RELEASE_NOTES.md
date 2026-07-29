@@ -1,10 +1,9 @@
-## TOR Career Uniques v1.7.35
+## TOR Career Uniques v1.7.36
 
-- Greatly reduced save-load work introduced by the v1.7.29 and later encounter-visual repairs.
-- Existing set items now validate their saved visual base through Bannerlord's indexed object lookup instead of rebuilding complete career outfits from the global character and item catalogues on every load.
-- The expensive culture/role resolver still runs when a legacy item is missing, uses the wrong slot, has an incompatible relic kind, or when an incomplete encounter hero genuinely needs repair.
-- Already validated persistent encounter heroes no longer rebuild their TOR career and template capabilities twice during one session launch.
-- The confirmed Grey Lord/Cowl fix, cross-culture fallback, exact-slot validation, caster weight cap, and transactional recovery remain intact.
-- No campaign-map polling or continuous scans were added.
+- Removed synchronous maintenance of all 22 encounter definitions from the save-loading critical path.
+- Persistent encounter-hero repair, equipment validation, and the Grey Lord/Cowl safeguards still complete before Bannerlord finalizes the loaded save.
+- Encounter party and guardian-site maintenance is now processed one definition at a time only after the campaign map becomes active.
+- Added one-shot timing diagnostics for TORCU's synchronous load stage and any unusually slow deferred encounter definition.
+- No continuous campaign-map scans or equipment polling were added.
 
 Install by completely deleting the old `Modules/TORCareerUniques` folder, then extract the clean archive into the Bannerlord root directory.
