@@ -1,4 +1,4 @@
-name: Audit pre-1.7.28 releases
+name: Audit pre-1.7.28 source history
 
 on:
   pull_request:
@@ -13,36 +13,88 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
-      - name: Collect historical release archives
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Recover historical source states
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p historical
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-            --json tagName,name,publishedAt,isDraft,isPrerelease > historical/release-list.json
+          mkdir -p historical/exports historical/reports
 
-          while IFS= read -r tag; do
-            if [[ "$tag" =~ ^v1\.7\.([0-9]+)$ ]]; then
-              patch="${BASH_REMATCH[1]}"
-              if (( patch <= 28 )); then
-                dir="historical/$tag"
-                mkdir -p "$dir"
-                gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
-                  --json tagName,name,targetCommitish,publishedAt,assets > "$dir/release.json"
-                gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" || true
+          git rev-list --all --objects > historical/reports/all-objects.txt
+          grep -Ei '1\.7\.28|canonical|bootstrap|\.import|source.*\.(zip|xz|tar)' \
+            historical/reports/all-objects.txt > historical/reports/relevant-objects.txt || true
+
+          git log --all --oneline --decorate --date-order > historical/reports/all-commits.txt
+          git log --all -S 'v1.7.28' --oneline --all -- \
+            Modules/TORCareerUniques/SubModule.xml > historical/reports/version-1728-commits.txt || true
+
+          {
+            echo -e 'commit\tmodule_version\tencounters_blob\tsetitem_blob\tmessage'
+            while IFS= read -r commit; do
+              version=''
+              if git cat-file -e "$commit:Modules/TORCareerUniques/SubModule.xml" 2>/dev/null; then
+                version=$(git show "$commit:Modules/TORCareerUniques/SubModule.xml" | \
+                  sed -n 's/.*<Version value="\([^"]*\)".*/\1/p' | head -1)
               fi
+              encounters=''
+              setitem=''
+              git cat-file -e "$commit:src/TORCareerUniques/Encounters.cs" 2>/dev/null && \
+                encounters=$(git rev-parse "$commit:src/TORCareerUniques/Encounters.cs")
+              git cat-file -e "$commit:src/TORCareerUniques/SetItemRuntime.cs" 2>/dev/null && \
+                setitem=$(git rev-parse "$commit:src/TORCareerUniques/SetItemRuntime.cs")
+              message=$(git show -s --format=%s "$commit" | tr '\t' ' ')
+              printf '%s\t%s\t%s\t%s\t%s\n' "$commit" "$version" "$encounters" "$setitem" "$message"
+            done < <(git rev-list --all -- Modules/TORCareerUniques/SubModule.xml src/TORCareerUniques/Encounters.cs src/TORCareerUniques/SetItemRuntime.cs)
+          } > historical/reports/source-state-index.tsv
+
+          mapfile -t v1728_commits < <(awk -F '\t' '$2 == "v1.7.28" { print $1 }' historical/reports/source-state-index.tsv)
+          printf '%s\n' "${v1728_commits[@]:-}" > historical/reports/v1728-source-commits.txt
+          for commit in "${v1728_commits[@]:-}"; do
+            [ -n "$commit" ] || continue
+            git archive --format=tar.gz --output="historical/exports/source-$commit.tar.gz" "$commit"
+          done
+
+          # Search every historical blob for the exact user-supplied v1.7.28 ZIP.
+          target='ff22144b51f10a6fcea351fddd26f4b631e28e442f70af78f844fe5aac2818b2'
+          : > historical/reports/matching-archive-blobs.txt
+          while read -r object path; do
+            [ "$(git cat-file -t "$object" 2>/dev/null || true)" = blob ] || continue
+            actual=$(git cat-file blob "$object" | sha256sum | awk '{print $1}')
+            if [ "$actual" = "$target" ]; then
+              printf '%s\t%s\n' "$object" "$path" | tee -a historical/reports/matching-archive-blobs.txt
+              git cat-file blob "$object" > "historical/exports/TOR_Career_Uniques_v1.7.28_FULL_SOURCE.zip"
             fi
-          done < <(jq -r '.[].tagName' historical/release-list.json)
+          done < historical/reports/all-objects.txt
 
-          find historical -type f -printf '%P\t%s bytes\n' | sort > historical/inventory.txt
-          cat historical/inventory.txt
+          # Recover the complete verified reconstruction payload if its transport is still reachable.
+          payload_commit='5f939bd3a150ffec0dac38fbfed5a5ed3f322538'
+          if git cat-file -e "$payload_commit^{commit}" 2>/dev/null; then
+            git ls-tree -r --name-only "$payload_commit" > historical/reports/payload-tree.txt
+            mapfile -t parts < <(git ls-tree -r --name-only "$payload_commit" | grep '^\.import/canonical/part-.*\.txt$' | sort)
+            if [ "${#parts[@]}" -gt 0 ]; then
+              : > /tmp/canonical.b64
+              for part in "${parts[@]}"; do
+                git show "$payload_commit:$part" >> /tmp/canonical.b64
+              done
+              base64 --decode /tmp/canonical.b64 > historical/exports/canonical-reconstruction.tar.xz
+              sha256sum historical/exports/canonical-reconstruction.tar.xz > historical/reports/canonical-reconstruction.sha256
+              xz --test historical/exports/canonical-reconstruction.tar.xz
+            fi
+          fi
 
-      - name: Upload historical releases
+          find historical -type f -printf '%P\t%s bytes\n' | sort > historical/reports/inventory.txt
+          cat historical/reports/version-1728-commits.txt || true
+          cat historical/reports/v1728-source-commits.txt || true
+          cat historical/reports/matching-archive-blobs.txt || true
+          cat historical/reports/inventory.txt
+
+      - name: Upload recovered history
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: TORCareerUniques-pre-1.7.29-releases
+          name: TORCareerUniques-pre-1.7.29-history
           path: historical
           if-no-files-found: error
           compression-level: 0
