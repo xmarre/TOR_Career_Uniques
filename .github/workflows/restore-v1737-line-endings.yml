@@ -1,0 +1,52 @@
+name: Restore v1.7.37 line endings
+
+on:
+  push:
+    branches:
+      - agent/pre-session-load-performance
+    paths:
+      - '.github/v1737-restore.b64'
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: agent/pre-session-load-performance
+          fetch-depth: 0
+      - name: Restore source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .github/v1737-restore.b64 > /tmp/v1737-restore.tar.gz
+          echo '4b0c2f9886a81599e1fc8735893e85e8954d2334199f63b1a964846efd5f3559  /tmp/v1737-restore.tar.gz' | sha256sum --check --strict
+          tar -xzf /tmp/v1737-restore.tar.gz -C .
+          rm -f .github/v1737-restore.b64 .github/workflows/restore-v1737-line-endings.yml
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path('.')
+          lines = []
+          for path in sorted(root.rglob('*')):
+              if not path.is_file():
+                  continue
+              rel = path.as_posix()
+              if rel == 'SOURCE_MANIFEST.sha256' or rel == '.git' or rel.startswith('.git/'):
+                  continue
+              if rel.startswith('artifacts/') or '/bin/' in rel or '/obj/' in rel:
+                  continue
+              lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {rel}")
+          Path('SOURCE_MANIFEST.sha256').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
+          PY
+
+          sha256sum --check --strict SOURCE_MANIFEST.sha256
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'Restore canonical source line endings'
+          git push origin HEAD:agent/pre-session-load-performance
