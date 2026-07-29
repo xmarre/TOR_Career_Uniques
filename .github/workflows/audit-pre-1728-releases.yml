@@ -1,0 +1,48 @@
+name: Audit pre-1.7.28 releases
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-pre-1728-releases.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect historical release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p historical
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,name,publishedAt,isDraft,isPrerelease > historical/release-list.json
+
+          while IFS= read -r tag; do
+            if [[ "$tag" =~ ^v1\.7\.([0-9]+)$ ]]; then
+              patch="${BASH_REMATCH[1]}"
+              if (( patch <= 28 )); then
+                dir="historical/$tag"
+                mkdir -p "$dir"
+                gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+                  --json tagName,name,targetCommitish,publishedAt,assets > "$dir/release.json"
+                gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" || true
+              fi
+            fi
+          done < <(jq -r '.[].tagName' historical/release-list.json)
+
+          find historical -type f -printf '%P\t%s bytes\n' | sort > historical/inventory.txt
+          cat historical/inventory.txt
+
+      - name: Upload historical releases
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TORCareerUniques-pre-1.7.29-releases
+          path: historical
+          if-no-files-found: error
+          compression-level: 0
