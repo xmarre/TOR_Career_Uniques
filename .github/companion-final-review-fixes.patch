@@ -1,0 +1,139 @@
+diff --git a/src/TORCareerUniques/CompanionSetRuntime.cs b/src/TORCareerUniques/CompanionSetRuntime.cs
+index 4de89f6..b022f80 100644
+--- a/src/TORCareerUniques/CompanionSetRuntime.cs
++++ b/src/TORCareerUniques/CompanionSetRuntime.cs
+@@ -34,6 +34,7 @@ namespace TORCareerUniques
+         private static bool _companionSetRefreshInProgress;
+         private static bool _internalCompanionCarrierMutation;
+         private static bool _companionSetSupportInstallAttempted;
++        private static bool _companionCarrierIsolationPending;
+ 
+         private sealed class HeroSetSnapshot
+         {
+@@ -332,8 +333,25 @@ namespace TORCareerUniques
+             {
+                 EnsureCurrentPlayerHeroSnapshots(mainHero, mainHeroState);
+                 List<HeroDesiredTraits> plans = BuildPlayerHeroDesiredTraits();
++                Dictionary<string, List<HeroDesiredTraits>> equippedUsers =
++                    BuildEquippedItemUsersById();
++                bool hasSharedTargets = HasSharedDesiredTargets(plans,
++                    equippedUsers);
++
++                // Item traits are keyed globally by item id. Shared carriers therefore
++                // require a hero-specific persistent copy, but replacing an EquipmentElement
++                // while InventoryLogic still owns the old element can corrupt the next
++                // unequip/drop operation. Defer only this rare isolation path until the
++                // inventory state has closed; all ordinary companion refreshes stay immediate.
++                if (hasSharedTargets && IsCompanionInventoryStateActive())
++                {
++                    _companionCarrierIsolationPending = true;
++                    return;
++                }
++                _companionCarrierIsolationPending = false;
+ 
+-                if (IsolateSharedDesiredTargets(plans))
++                if (hasSharedTargets &&
++                    IsolateSharedDesiredTargets(plans, equippedUsers))
+                 {
+                     _forceFullCompanionSetSnapshot = true;
+                     EnsureCurrentPlayerHeroSnapshots(mainHero, null);
+@@ -374,15 +392,20 @@ namespace TORCareerUniques
+             for (int i = 0; i < dirty.Length; i++)
+             {
+                 object equipment = dirty[i];
+-                object hero = FindPlayerHeroByBattleEquipment(equipment);
+-                if (hero == null)
+-                    continue;
+ 
++                // Invalidate the cached owner and snapshot first. If the hero died or
++                // left the clan, the live lookup below must be allowed to return null so
++                // orphaned desired traits cannot survive through a stale dictionary entry.
++                PlayerHeroByBattleEquipment.Remove(equipment);
+                 for (int s = PlayerHeroSetSnapshots.Count - 1; s >= 0; s--)
+                     if (Object.ReferenceEquals(
+                         PlayerHeroSetSnapshots[s].BattleEquipment, equipment))
+                         PlayerHeroSetSnapshots.RemoveAt(s);
+ 
++                object hero = FindPlayerHeroByBattleEquipment(equipment);
++                if (hero == null)
++                    continue;
++
+                 bool isMainHero = Object.ReferenceEquals(hero, mainHero);
+                 Dictionary<string, EquippedSetState> supplied =
+                     isMainHero ? mainHeroState : null;
+@@ -708,11 +731,27 @@ namespace TORCareerUniques
+             }
+         }
+ 
++        private static bool HasSharedDesiredTargets(
++            List<HeroDesiredTraits> plans,
++            Dictionary<string, List<HeroDesiredTraits>> users)
++        {
++            for (int p = 0; p < plans.Count; p++)
++            {
++                foreach (string itemId in plans[p].Desired.Keys)
++                {
++                    List<HeroDesiredTraits> equippedUsers;
++                    if (users.TryGetValue(itemId, out equippedUsers) &&
++                        equippedUsers.Count > 1)
++                        return true;
++                }
++            }
++            return false;
++        }
++
+         private static bool IsolateSharedDesiredTargets(
+-            List<HeroDesiredTraits> plans)
++            List<HeroDesiredTraits> plans,
++            Dictionary<string, List<HeroDesiredTraits>> users)
+         {
+-            Dictionary<string, List<HeroDesiredTraits>> users =
+-                BuildEquippedItemUsersById();
+             bool changed = false;
+ 
+             for (int p = 0; p < plans.Count; p++)
+@@ -826,8 +865,8 @@ namespace TORCareerUniques
+             object target, string itemId)
+         {
+             string[] slots = { "Weapon0", "Weapon1", "Weapon2", "Weapon3",
+-                "Head", "Body", "Leg", "Gloves", "Cape", "Horse",
+-                "HorseHarness" };
++                "Weapon4", "Head", "Body", "Leg", "Gloves", "Cape",
++                "Horse", "HorseHarness" };
+             for (int i = 0; i < slots.Length; i++)
+             {
+                 object item = GetEquipmentItem(equipment, slots[i]);
+@@ -1306,6 +1345,21 @@ namespace TORCareerUniques
+             _forceFullCompanionSetSnapshot = true;
+             _companionSetRefreshInProgress = false;
+             _internalCompanionCarrierMutation = false;
++            _companionCarrierIsolationPending = false;
++        }
++
++        internal static void TickPendingCompanionSetWork()
++        {
++            if (!_companionCarrierIsolationPending ||
++                _companionSetRefreshInProgress ||
++                IsCompanionInventoryStateActive() ||
++                !IsCompanionRuntimeStateActive())
++                return;
++
++            _companionCarrierIsolationPending = false;
++            Tick();
++            if (_companionSetSnapshotDirty)
++                _companionCarrierIsolationPending = true;
+         }
+ 
+         private static bool IsCompanionInventoryStateActive()
+diff --git a/src/TORCareerUniques/ModInfrastructure.cs b/src/TORCareerUniques/ModInfrastructure.cs
+index ba3f8a2..d6cb0f4 100644
+--- a/src/TORCareerUniques/ModInfrastructure.cs
++++ b/src/TORCareerUniques/ModInfrastructure.cs
+@@ -48,6 +48,7 @@ namespace TORCareerUniques
+         {
+             // The direct widget patch installer is a one-time, constant-time check.
+             UIIconPassThrough.Tick();
++            SetItemRuntime.TickPendingCompanionSetWork();
+             AdminBridge.Tick(dt);
+             McmHotkeyBridge.Tick();
+         }
