@@ -12,8 +12,8 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
-[assembly: AssemblyVersion("1.7.16.0")]
-[assembly: AssemblyFileVersion("1.7.16.0")]
+[assembly: AssemblyVersion("1.7.37.0")]
+[assembly: AssemblyFileVersion("1.7.37.0")]
 
 namespace TORCareerUniques
 {
@@ -630,7 +630,7 @@ namespace TORCareerUniques
         {
             _moduleDirectory = ResolveModuleDirectory();
             PersistentConfig.Initialize(_moduleDirectory);
-            Write("INFO", "TOR Career Uniques v1.7.16 loaded. Dedicated encounter factions, conversation-safe clan leadership, and hostile encounter diplomacy active.");
+            Write("INFO", "TOR Career Uniques v1.7.37 loaded. Pre-session load guard, early trait registration, and campaign-map-gated encounter maintenance active.");
         }
 
         internal static void LogMcmStatus()
@@ -647,6 +647,11 @@ namespace TORCareerUniques
             {
                 Write("WARN", "MCM settings lookup failed (" + ex.GetType().Name + "). No settlement-menu fallback is registered.");
             }
+        }
+
+        internal static void AlwaysInfo(string message)
+        {
+            Write("INFO", message);
         }
 
         internal static void Info(string message)

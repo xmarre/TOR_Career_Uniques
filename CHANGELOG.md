@@ -1,3 +1,11 @@
+## 1.7.37
+
+- Added a temporary pre-session guard for TORCU encounter clans whose intentionally absent naval party template can be queried by native/TOR load paths before the existing bandit classifier guard runs.
+- Registers TORCU relic and set traits before TOR restores saved crafted set items when the trait registry is available.
+- Added unconditional one-shot timing for TOR artisan save restoration, crafted-item reconstruction, native bandit-cache rebuilding, the pre-session boundary, and TORCU's own session callback.
+- Removes the temporary naval getter patch after loading so it adds no campaign-map Harmony overhead.
+- Retains the v1.7.29 Grey Lord/Cowl repair, v1.7.35 visual fast path, and v1.7.36 deferred encounter maintenance.
+
 # Changelog
 
 ## 1.7.36
