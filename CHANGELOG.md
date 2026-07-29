@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.34
+
+- Added an authoritative main-party roster fallback so every inventory-selectable companion is included even when Bannerlord or another mod has not synchronized that hero into the clan collections.
+- Added a live set-owner reconciliation path for stale inventory equipment snapshots; hovering an equipped set piece now rebuilds that companion's state and applies the corrected bonuses immediately.
+- Retains event-driven operation with no campaign-map polling, per-frame hero scans, or equipment fingerprint checks.
+
 ## 1.7.33
 
 - Fixed ordinary companions being omitted from career-set snapshots because Bannerlord exposes them through `Clan.Companions` separately from `Clan.Heroes`.
