@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.31
+
+- Fixed encounter careers whose declared TOR culture exposes no role-compatible armour source in the live object catalogue.
+- Added a bounded adjacent-culture fallback inferred from career-specific archetype phrases and relic-compatible equipment instead of hard-coded item ids.
+- Keeps the declared culture authoritative whenever it provides at least one usable role-compatible character.
+- Fixed the Grey Lord equipment path when Eonir culture metadata is absent but compatible elven caster equipment is available.
+- Preserved exact-slot validation, negative-role filtering, coherent outfit selection, and the 11-weight caster armour cap.
+
 ## 1.7.30
 
 - Made encounter-hero creation transactional for every career.
@@ -10,10 +18,9 @@
 
 ## 1.7.29
 
-- Fixed a general save-loading failure caused when an encounter career's matched TOR archetype outfits could not produce a complete, slot-valid loadout within the applicable armour-weight limit.
-- Added the bounded culture/role catalogue resolver for every career using the shared outfit-resolution path.
-- Fixed the Grey Lord's `Cowl of Unremembered Faces` as the confirmed data path that exposed the general resolver defect.
-- Prevented that resolver failure from leaving an incomplete encounter hero for Bannerlord's load-finalization validation.
+- Added the first bounded culture/role catalogue fallback when matched TOR archetype outfits could not produce a complete, slot-valid loadout within the applicable armour-weight limit.
+- Applied the shared fallback to every encounter career rather than adding a Grey Lord-only item override.
+- Added exact-slot visual-base validation for the Grey Lord's `Cowl of Unremembered Faces` failure path.
 - Preserved the 11-weight caster cap, culture/role filtering, exact-slot checks, and native equipment validation.
 - Rebuilt the repository from the canonical v1.7.28 source and removed historical validation reports, investigations, emergency binary-patch scripts, and transport artefacts.
 
