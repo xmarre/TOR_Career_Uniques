@@ -1,0 +1,49 @@
+name: Apply companion clan enumeration fix
+
+on:
+  push:
+    branches:
+      - agent/companion-clan-enumeration
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: agent/companion-clan-enumeration
+          fetch-depth: 0
+      - name: Apply reviewed source patch
+        shell: pwsh
+        run: |
+          git apply --check .github/companion-clan-enumeration-v1733.patch
+          git apply .github/companion-clan-enumeration-v1733.patch
+          Remove-Item .github/companion-clan-enumeration-v1733.patch -Force
+          Remove-Item .github/workflows/apply-companion-clan-enumeration.yml -Force
+      - name: Regenerate source manifest
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $paths = Get-ChildItem -LiteralPath $root -File -Recurse | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            $top = $relative.Split('/')[0]
+            if ($top -in @('.git', 'artifacts')) { return }
+            if ($relative -eq 'SOURCE_MANIFEST.sha256') { return }
+            $relative
+          } | Sort-Object
+          $lines = foreach ($relative in $paths) {
+            $hash = (Get-FileHash -LiteralPath (Join-Path $root $relative) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $relative"
+          }
+          $lines | Set-Content -LiteralPath SOURCE_MANIFEST.sha256 -Encoding ascii
+      - name: Commit final source tree
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Include ordinary companions in set snapshots"
+          git push origin HEAD:agent/companion-clan-enumeration
