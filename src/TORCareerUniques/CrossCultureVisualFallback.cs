@@ -11,7 +11,7 @@ namespace TORCareerUniques
             "torcareeruniques.visuals.cross-culture-role-fallback";
 
         private static readonly bool CrossCultureVisualFallbackInstalled =
-            InstallCrossCultureVisualFallback();
+            TryInstallCrossCultureVisualFallback();
 
         private static readonly Dictionary<string, string> InferredVisualCultureByCareer =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -19,14 +19,12 @@ namespace TORCareerUniques
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static object _crossCultureVisualResolverSession;
 
-        // The resolver relies on this fallback to keep missing or incomplete TOR culture
-        // metadata from aborting encounter-hero creation. Install it before any visual
-        // catalogue lookup can execute rather than allowing an unsafe degraded mode.
+        // An explicit type constructor guarantees the one-time installation attempt before
+        // the resolver is used. Installation failure is logged and leaves the original
+        // declared-culture resolver active; v1.7.30's transactional hero rollback remains
+        // the hard safety boundary.
         static SetItemRuntime()
         {
-            if (!CrossCultureVisualFallbackInstalled)
-                throw new InvalidOperationException(
-                    "Cross-culture visual role fallback was not installed.");
         }
 
         private sealed class VisualCultureFallbackCandidate
@@ -34,6 +32,21 @@ namespace TORCareerUniques
             internal string CultureKey;
             internal string CultureName;
             internal int Score;
+        }
+
+        private static bool TryInstallCrossCultureVisualFallback()
+        {
+            try
+            {
+                return InstallCrossCultureVisualFallback();
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Cross-culture visual role fallback could not be installed; " +
+                    "the original declared-culture resolver remains active. " +
+                    ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
         }
 
         private static bool InstallCrossCultureVisualFallback()
