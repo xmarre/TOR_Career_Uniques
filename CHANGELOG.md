@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.35
+
+- Replaced the unconditional full visual-catalogue migration on every save load with a structural fast audit of the generated set items already stored in the save.
+- Saved visual bases are now checked through Bannerlord's indexed object lookup; compatible relic bases and exact-slot armour bases bypass all global catalogue resolution, while missing, wrong-slot, or otherwise invalid legacy visuals still enter the bounded v1.7.29+ fallback.
+- Schema-current persistent encounter heroes now retain their verified TOR career record instead of rebuilding template capabilities, career tiers, choices, and abilities on every load.
+- Deduplicated persistent encounter-hero auditing within the same session launch so encounter initialization cannot immediately repeat an audit that already succeeded during reconciliation.
+- Retains the Grey Lord/Cowl repair, cross-culture role fallback, exact-slot validation, caster weight cap, and transactional incomplete-hero recovery.
+- Adds no campaign-map polling, per-frame catalogue scans, or equipment fingerprint checks.
+
 ## 1.7.34
 
 - Added an authoritative main-party roster fallback so every inventory-selectable companion is included even when Bannerlord or another mod has not synchronized that hero into the clan collections.
