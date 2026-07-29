@@ -1,0 +1,68 @@
+name: Verify completed v1.7.33 release
+
+on:
+  push:
+    branches: [agent/verify-v1.7.33-release-final]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify release assets and checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_SHA: a358eb0592a6f8634276bb4bd248deab75fd1fa4
+          TAG: v1.7.33
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/agent/verify-v1.7.33-release-final" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          complete=false
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt,url,assets > release.json 2>/dev/null && \
+               jq -e '([.assets[].name] | sort) == ["SHA256SUMS.txt","TOR_Career_Uniques_v1.7.33_Bannerlord_1.3.15_TOR_1.16_CLEAN.zip","TOR_Career_Uniques_v1.7.33_FULL_SOURCE_Bannerlord_1.3.15_TOR_1.16.zip"]' release.json >/dev/null; then
+              complete=true
+              break
+            fi
+            sleep 10
+          done
+          test "$complete" = true
+
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')
+          test "$tag_sha" = "$EXPECTED_SHA"
+
+          mkdir downloads
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir downloads
+          (
+            cd downloads
+            sha256sum -c SHA256SUMS.txt
+          ) | tee checksum-results.txt
+
+          published=$(jq -r '.publishedAt' release.json)
+          url=$(jq -r '.url' release.json)
+          checks=$(sed 's/^/- `/' checksum-results.txt | sed 's/: OK$/`: OK/')
+          sizes=$(jq -r '.assets[] | "- `\(.name)`: \(.size) bytes"' release.json)
+
+          body=$(cat <<EOF
+Release verification passed for **v1.7.33**.
+
+- Tag target: \`$tag_sha\`
+- Published: \`$published\`
+- Release: $url
+- SHA-256 validation:
+$checks
+
+Asset sizes:
+$sizes
+EOF
+          )
+          gh pr comment 9 --repo "$GITHUB_REPOSITORY" --body "$body"
