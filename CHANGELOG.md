@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.36
+
+- Removed the all-22-encounter maintenance pass from Bannerlord's synchronous save-load callback.
+- Persistent encounter heroes are still fully reconciled and validated before load finalization, preserving the v1.7.29 Grey Lord/Cowl crash fix.
+- Roaming-party and guardian-site maintenance now uses the existing one-definition-at-a-time initializer only after the campaign map is active.
+- Added one-shot load and slow-initialization timing diagnostics to identify any remaining save-specific bottleneck without campaign-map polling.
+
 ## 1.7.35
 
 - Replaced the unconditional full visual-catalogue migration on every save load with a structural fast audit of the generated set items already stored in the save.
