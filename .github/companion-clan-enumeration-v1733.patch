@@ -1,0 +1,143 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 6d5c04b..98493b6 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,12 @@
+ # Changelog
+ 
++## 1.7.33
++
++- Fixed ordinary companions being omitted from career-set snapshots because Bannerlord exposes them through `Clan.Companions` separately from `Clan.Heroes`.
++- Set pieces equipped by companions now resolve the correct owner and report the actual equipped count, including `[ADMIN COPY]` test sets.
++- Uses one deduplicated player-clan enumeration for bonus snapshots, equipment-owner lookup, and set-item normalization so lords, family heroes, and companions follow the same path.
++- Retains the existing event-driven refresh model; no campaign-map scans, continuous clan enumeration, or equipment fingerprint polling were added.
++
+ ## 1.7.32
+ 
+ - Added full individual-piece and 2/5–5/5 set-bonus activation for ordinary player-clan companions and other living player-clan heroes.
+diff --git a/Modules/TORCareerUniques/SubModule.xml b/Modules/TORCareerUniques/SubModule.xml
+index 9f8b0af..6bafdfe 100644
+--- a/Modules/TORCareerUniques/SubModule.xml
++++ b/Modules/TORCareerUniques/SubModule.xml
+@@ -2,7 +2,7 @@
+ <Module>
+   <Name value="TOR Career Uniques" />
+   <Id value="TORCareerUniques" />
+-    <Version value="v1.7.32" />
++    <Version value="v1.7.33" />
+   <DefaultModule value="false" />
+   <SingleplayerModule value="true" />
+   <Official value="false" />
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+index 599dd9a..06b8376 100644
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -1,10 +1,9 @@
+-## TOR Career Uniques v1.7.32
++## TOR Career Uniques v1.7.33
+ 
+-- Ordinary companions and other living player-clan heroes now activate their own career-set piece effects and cumulative 2/5–5/5 bonuses.
+-- Each hero's equipment is evaluated independently; set pieces can never combine across different characters.
+-- Set tooltips now show the equipped owner's active set state when the inspected piece belongs to a companion.
+-- Recruited encounter heroes retain their already embedded equipment payload without receiving duplicate runtime bonuses.
+-- Mastery, recognition, and recruitment requirements remain tied to the currently controlled hero.
+-- Refreshes remain event-driven on session launch, inventory entry, equipment changes, and companion-roster changes. No campaign-map polling or equipment fingerprint scans were added.
++- Fixed career sets equipped by ordinary companions incorrectly showing `0/5` and leaving every set bonus locked.
++- Companion equipment is now discovered through Bannerlord's dedicated companion collection as well as the normal clan-hero collections.
++- Both real career-set items and `[ADMIN COPY]` test sets now resolve the equipped companion as their owner and activate the correct piece and tier bonuses.
++- Player-clan hero enumeration is deduplicated and remains limited to existing session, inventory, equipment-change, and roster-change refresh events.
++- No campaign-map polling, continuous scans, or equipment fingerprint checks were added.
+ 
+ Install by completely deleting the old `Modules/TORCareerUniques` folder, then extract the clean archive into the Bannerlord root directory.
+diff --git a/src/TORCareerUniques/CompanionSetRuntime.cs b/src/TORCareerUniques/CompanionSetRuntime.cs
+index b022f80..f2ff6d2 100644
+--- a/src/TORCareerUniques/CompanionSetRuntime.cs
++++ b/src/TORCareerUniques/CompanionSetRuntime.cs
+@@ -432,18 +432,13 @@ namespace TORCareerUniques
+ 
+             object playerClan = GetStaticProperty(
+                 TypeByName("TaleWorlds.CampaignSystem.Clan"), "PlayerClan");
+-            IEnumerable heroes = playerClan == null ? null :
+-                GetProperty(playerClan, "Heroes") as IEnumerable;
+-            if (heroes != null)
++            foreach (object hero in EnumeratePlayerClanHeroes(playerClan))
+             {
+-                foreach (object hero in heroes)
+-                {
+-                    if (hero == null || visited.Contains(hero) ||
+-                        ToBoolean(GetProperty(hero, "IsDead")))
+-                        continue;
+-                    visited.Add(hero);
+-                    AddPlayerHeroSetSnapshot(hero, null, false);
+-                }
++                if (visited.Contains(hero) ||
++                    ToBoolean(GetProperty(hero, "IsDead")))
++                    continue;
++                visited.Add(hero);
++                AddPlayerHeroSetSnapshot(hero, null, false);
+             }
+ 
+             RebuildSnapshotIndexes();
+@@ -451,6 +446,30 @@ namespace TORCareerUniques
+             _companionSetSnapshotAvailable = true;
+         }
+ 
++        private static IEnumerable EnumeratePlayerClanHeroes(
++            object playerClan)
++        {
++            if (playerClan == null)
++                yield break;
++
++            // Bannerlord keeps ordinary companions in Clan.Companions rather
++            // than guaranteeing they are present in Clan.Heroes. Read all
++            // public clan-hero collections and deduplicate by object identity.
++            HashSet<object> yielded = new HashSet<object>(
++                ReferenceObjectComparer.Instance);
++            string[] collectionNames = { "Heroes", "Companions", "Lords" };
++            for (int i = 0; i < collectionNames.Length; i++)
++            {
++                IEnumerable heroes = GetProperty(playerClan,
++                    collectionNames[i]) as IEnumerable;
++                if (heroes == null)
++                    continue;
++                foreach (object hero in heroes)
++                    if (hero != null && yielded.Add(hero))
++                        yield return hero;
++            }
++        }
++
+         private static void AddPlayerHeroSetSnapshot(object hero,
+             Dictionary<string, EquippedSetState> suppliedState,
+             bool isMainHero)
+@@ -1251,12 +1270,7 @@ namespace TORCareerUniques
+             object playerClan = GetStaticProperty(
+                 TypeByName("TaleWorlds.CampaignSystem.Clan"),
+                 "PlayerClan");
+-            IEnumerable heroes = playerClan == null ? null :
+-                GetProperty(playerClan, "Heroes") as IEnumerable;
+-            if (heroes == null)
+-                return null;
+-
+-            foreach (object candidate in heroes)
++            foreach (object candidate in EnumeratePlayerClanHeroes(playerClan))
+             {
+                 if (candidate == null ||
+                     ToBoolean(GetProperty(candidate, "IsDead")))
+diff --git a/src/TORCareerUniques/SetItemRuntime.cs b/src/TORCareerUniques/SetItemRuntime.cs
+index 79e2628..e1c8034 100644
+--- a/src/TORCareerUniques/SetItemRuntime.cs
++++ b/src/TORCareerUniques/SetItemRuntime.cs
+@@ -438,12 +438,7 @@ namespace TORCareerUniques
+             }
+ 
+             Clan playerClan = Clan.PlayerClan;
+-            IEnumerable clanHeroes = playerClan == null ? null :
+-                GetProperty(playerClan, "Heroes") as IEnumerable;
+-            if (clanHeroes == null)
+-                return;
+-
+-            foreach (object hero in clanHeroes)
++            foreach (object hero in EnumeratePlayerClanHeroes(playerClan))
+             {
+                 if (hero == null || visited.Contains(hero))
+                     continue;
