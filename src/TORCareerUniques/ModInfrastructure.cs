@@ -25,6 +25,7 @@ namespace TORCareerUniques
             EncounterHeroDeathGuard.Initialize();
             CareerUniqueRuntime.Initialize();
             SetItemRuntime.Initialize();
+            SetItemRuntime.InitializeCompanionSetSupport();
             InventorySetTooltipBridge.Initialize();
             RuntimePerformanceGate.Initialize();
             EncounterAffinityRuntime.Initialize();

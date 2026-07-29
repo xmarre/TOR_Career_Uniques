@@ -24,8 +24,6 @@ namespace TORCareerUniques
             new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<object> DirtyPlayerBattleEquipment =
             new HashSet<object>(ReferenceObjectComparer.Instance);
-        private static readonly bool CompanionSetSupportInstalled =
-            TryInstallCompanionSetSupport();
 
         private static object _companionSetCampaignSession;
         private static object _companionSetSnapshotMainHero;
@@ -35,6 +33,7 @@ namespace TORCareerUniques
         private static bool _forceFullCompanionSetSnapshot = true;
         private static bool _companionSetRefreshInProgress;
         private static bool _internalCompanionCarrierMutation;
+        private static bool _companionSetSupportInstallAttempted;
 
         private sealed class HeroSetSnapshot
         {
@@ -76,6 +75,14 @@ namespace TORCareerUniques
                 return obj == null ? 0 :
                     System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
             }
+        }
+
+        internal static void InitializeCompanionSetSupport()
+        {
+            if (_companionSetSupportInstallAttempted)
+                return;
+            _companionSetSupportInstallAttempted = true;
+            TryInstallCompanionSetSupport();
         }
 
         private static bool TryInstallCompanionSetSupport()
@@ -1143,11 +1150,20 @@ namespace TORCareerUniques
 
         private static void BeforeRuntimeEquipmentMutation(object __0)
         {
-            if (_internalCompanionCarrierMutation)
+            // Equipment mutations occur throughout Bannerlord while parties, troops,
+            // encounters and mission agents are initialized. Only a living player-clan
+            // hero edited from the inventory screen can invalidate this cache.
+            if (_internalCompanionCarrierMutation || __0 == null ||
+                !IsCompanionInventoryStateActive())
                 return;
+
             EnsureCompanionSetSession();
-            if (__0 != null)
-                DirtyPlayerBattleEquipment.Add(__0);
+            if (FindPlayerHeroByBattleEquipment(__0) == null)
+                return;
+
+            // Preserve every unaffected hero snapshot. EnsureCurrentPlayerHeroSnapshots
+            // replaces only the snapshot whose exact BattleEquipment object is dirty.
+            DirtyPlayerBattleEquipment.Add(__0);
             _companionSetSnapshotDirty = true;
         }
 
