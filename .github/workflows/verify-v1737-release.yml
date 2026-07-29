@@ -1,0 +1,62 @@
+name: Verify v1.7.37 release
+
+on:
+  push:
+    branches:
+      - agent/verify-v1.7.37-release
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: 407f6b7313f350b29812941b21e63b3f06e373ff
+          VERIFY_BRANCH: agent/verify-v1.7.37-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if gh release view v1.7.37 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 5
+          done
+
+          release_json=$(gh release view v1.7.37 --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt,isDraft,isPrerelease,assets,url)
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.7.37" --jq '.object.sha')
+          test "$tag_sha" = "$EXPECTED_SHA"
+          test "$(jq -r '.isDraft' <<<"$release_json")" = "false"
+          test "$(jq -r '.isPrerelease' <<<"$release_json")" = "false"
+
+          expected=$(cat <<'EOF'
+SHA256SUMS.txt
+TOR_Career_Uniques_v1.7.37_Bannerlord_1.3.15_TOR_1.16_CLEAN.zip
+TOR_Career_Uniques_v1.7.37_FULL_SOURCE_Bannerlord_1.3.15_TOR_1.16.zip
+EOF
+          )
+          actual=$(jq -r '.assets[].name' <<<"$release_json" | sort)
+          test "$actual" = "$expected"
+
+          mkdir release
+          gh release download v1.7.37 --repo "$GITHUB_REPOSITORY" --dir release
+          (cd release && sha256sum -c SHA256SUMS.txt) | tee checksum-result.txt
+
+          {
+            echo '## v1.7.37 release verification'
+            echo
+            echo "- Tag target: \`$tag_sha\`"
+            echo "- Release metadata: \`$release_json\`"
+            echo '- Archive checksums:'
+            echo '```text'
+            cat checksum-result.txt
+            echo '```'
+          } > verification-comment.md
+          gh pr comment 14 --repo "$GITHUB_REPOSITORY" --body-file verification-comment.md
+
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$VERIFY_BRANCH"
