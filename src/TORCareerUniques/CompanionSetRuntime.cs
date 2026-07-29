@@ -432,23 +432,42 @@ namespace TORCareerUniques
 
             object playerClan = GetStaticProperty(
                 TypeByName("TaleWorlds.CampaignSystem.Clan"), "PlayerClan");
-            IEnumerable heroes = playerClan == null ? null :
-                GetProperty(playerClan, "Heroes") as IEnumerable;
-            if (heroes != null)
+            foreach (object hero in EnumeratePlayerClanHeroes(playerClan))
             {
-                foreach (object hero in heroes)
-                {
-                    if (hero == null || visited.Contains(hero) ||
-                        ToBoolean(GetProperty(hero, "IsDead")))
-                        continue;
-                    visited.Add(hero);
-                    AddPlayerHeroSetSnapshot(hero, null, false);
-                }
+                if (visited.Contains(hero) ||
+                    ToBoolean(GetProperty(hero, "IsDead")))
+                    continue;
+                visited.Add(hero);
+                AddPlayerHeroSetSnapshot(hero, null, false);
             }
 
             RebuildSnapshotIndexes();
             _companionSetSnapshotMainHero = mainHero;
             _companionSetSnapshotAvailable = true;
+        }
+
+        private static IEnumerable EnumeratePlayerClanHeroes(
+            object playerClan)
+        {
+            if (playerClan == null)
+                yield break;
+
+            // Bannerlord keeps ordinary companions in Clan.Companions rather
+            // than guaranteeing they are present in Clan.Heroes. Read all
+            // public clan-hero collections and deduplicate by object identity.
+            HashSet<object> yielded = new HashSet<object>(
+                ReferenceObjectComparer.Instance);
+            string[] collectionNames = { "Heroes", "Companions", "Lords" };
+            for (int i = 0; i < collectionNames.Length; i++)
+            {
+                IEnumerable heroes = GetProperty(playerClan,
+                    collectionNames[i]) as IEnumerable;
+                if (heroes == null)
+                    continue;
+                foreach (object hero in heroes)
+                    if (hero != null && yielded.Add(hero))
+                        yield return hero;
+            }
         }
 
         private static void AddPlayerHeroSetSnapshot(object hero,
@@ -1251,12 +1270,7 @@ namespace TORCareerUniques
             object playerClan = GetStaticProperty(
                 TypeByName("TaleWorlds.CampaignSystem.Clan"),
                 "PlayerClan");
-            IEnumerable heroes = playerClan == null ? null :
-                GetProperty(playerClan, "Heroes") as IEnumerable;
-            if (heroes == null)
-                return null;
-
-            foreach (object candidate in heroes)
+            foreach (object candidate in EnumeratePlayerClanHeroes(playerClan))
             {
                 if (candidate == null ||
                     ToBoolean(GetProperty(candidate, "IsDead")))

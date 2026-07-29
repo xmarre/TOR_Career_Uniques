@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.33
+
+- Fixed ordinary companions being omitted from career-set snapshots because Bannerlord exposes them through `Clan.Companions` separately from `Clan.Heroes`.
+- Set pieces equipped by companions now resolve the correct owner and report the actual equipped count, including `[ADMIN COPY]` test sets.
+- Uses one deduplicated player-clan enumeration for bonus snapshots, equipment-owner lookup, and set-item normalization so lords, family heroes, and companions follow the same path.
+- Retains the existing event-driven refresh model; no campaign-map scans, continuous clan enumeration, or equipment fingerprint polling were added.
+
 ## 1.7.32
 
 - Added full individual-piece and 2/5–5/5 set-bonus activation for ordinary player-clan companions and other living player-clan heroes.
