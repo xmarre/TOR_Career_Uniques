@@ -25,6 +25,7 @@ namespace TORCareerUniques
             EncounterHeroDeathGuard.Initialize();
             CareerUniqueRuntime.Initialize();
             SetItemRuntime.Initialize();
+            SetItemRuntime.InitializeCompanionSetSupport();
             InventorySetTooltipBridge.Initialize();
             RuntimePerformanceGate.Initialize();
             EncounterAffinityRuntime.Initialize();
@@ -47,6 +48,7 @@ namespace TORCareerUniques
         {
             // The direct widget patch installer is a one-time, constant-time check.
             UIIconPassThrough.Tick();
+            SetItemRuntime.TickPendingCompanionSetWork();
             AdminBridge.Tick(dt);
             McmHotkeyBridge.Tick();
         }

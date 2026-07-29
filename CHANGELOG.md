@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.32
+
+- Added full individual-piece and 2/5–5/5 set-bonus activation for ordinary player-clan companions and other living player-clan heroes.
+- Evaluates every hero independently so pieces equipped by different characters can never combine into a false set tier.
+- Added owner-aware set tooltips for set pieces equipped by companions while retaining the controlled hero as the fallback for unequipped inventory items.
+- Excludes persistent encounter-hero equipment whose intrinsic and tier traits were already baked into its generated wargear, preventing duplicate bonuses after recruitment.
+- Keeps mastery, recognition, and encounter-hero recruitment checks tied to the currently controlled hero.
+- Uses only campaign-session, inventory-entry, equipment-mutation, and companion-roster events; no campaign-map tick scans or equipment fingerprint polling were added.
+
 ## 1.7.31
 
 - Fixed encounter careers whose declared TOR culture exposes no role-compatible armour source in the live object catalogue.
