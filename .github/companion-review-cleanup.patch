@@ -1,0 +1,227 @@
+diff --git a/src/TORCareerUniques/CompanionSetPerformanceGuard.cs b/src/TORCareerUniques/CompanionSetPerformanceGuard.cs
+deleted file mode 100644
+index 7984652..0000000
+--- a/src/TORCareerUniques/CompanionSetPerformanceGuard.cs
++++ /dev/null
+@@ -1,76 +0,0 @@
+-using System;
+-using System.Reflection;
+-
+-namespace TORCareerUniques
+-{
+-    internal static partial class SetItemRuntime
+-    {
+-        private const string CompanionMutationGuardHarmonyId =
+-            "torcareeruniques.sets.companion-mutation-guard";
+-
+-        private static readonly bool CompanionMutationGuardInstalled =
+-            TryInstallCompanionMutationGuard();
+-
+-        private static bool TryInstallCompanionMutationGuard()
+-        {
+-            try
+-            {
+-                Type harmonyType = FindCrossCultureHarmonyType(
+-                    "HarmonyLib.Harmony", "0Harmony");
+-                Type harmonyMethodType = FindCrossCultureHarmonyType(
+-                    "HarmonyLib.HarmonyMethod", "0Harmony");
+-                if (harmonyType == null || harmonyMethodType == null)
+-                    throw new TypeLoadException(
+-                        "HarmonyLib is unavailable while installing the companion mutation guard.");
+-
+-                MethodInfo original = typeof(SetItemRuntime).GetMethod(
+-                    "BeforeRuntimeEquipmentMutation",
+-                    BindingFlags.NonPublic | BindingFlags.Static,
+-                    null, new[] { typeof(object) }, null);
+-                MethodInfo prefix = typeof(SetItemRuntime).GetMethod(
+-                    nameof(GuardCompanionMutationInvalidation),
+-                    BindingFlags.NonPublic | BindingFlags.Static);
+-                if (original == null || prefix == null)
+-                    throw new MissingMethodException(typeof(SetItemRuntime).FullName,
+-                        "BeforeRuntimeEquipmentMutation guard target");
+-
+-                object harmony = Activator.CreateInstance(harmonyType,
+-                    new object[] { CompanionMutationGuardHarmonyId });
+-                PatchCompanionSetMethod(harmonyType, harmonyMethodType, harmony,
+-                    original, prefix, null);
+-                return true;
+-            }
+-            catch (Exception ex)
+-            {
+-                ModLog.Error("Companion equipment mutation guard could not be installed. " +
+-                    ex.GetType().Name + ": " + ex.Message);
+-                return false;
+-            }
+-        }
+-
+-        // The underlying Equipment method is used throughout Bannerlord while parties,
+-        // troops, encounters, and mission agents are being initialized. Only player-clan
+-        // battle equipment changed from the active inventory screen can affect this cache.
+-        // Rejecting every other call prevents unrelated equipment churn from growing the
+-        // dirty set or scheduling a later clan-wide refresh.
+-        private static bool GuardCompanionMutationInvalidation(object __0)
+-        {
+-            try
+-            {
+-                if (_internalCompanionCarrierMutation || __0 == null ||
+-                    !IsCompanionInventoryStateActive())
+-                    return false;
+-                return FindPlayerHeroByBattleEquipment(__0) != null;
+-            }
+-            catch (Exception ex)
+-            {
+-                LogOnce("companion-mutation-guard:" + ex.GetType().FullName + ":" +
+-                    ex.Message,
+-                    "Companion equipment mutation guard failed; the mutation will be " +
+-                    "reconciled on the next bounded inventory/session refresh. " +
+-                    FormatException(ex));
+-                return false;
+-            }
+-        }
+-    }
+-}
+diff --git a/src/TORCareerUniques/CompanionSetRuntime.cs b/src/TORCareerUniques/CompanionSetRuntime.cs
+index d2adeed..4de89f6 100644
+--- a/src/TORCareerUniques/CompanionSetRuntime.cs
++++ b/src/TORCareerUniques/CompanionSetRuntime.cs
+@@ -24,8 +24,6 @@ namespace TORCareerUniques
+             new HashSet<string>(StringComparer.Ordinal);
+         private static readonly HashSet<object> DirtyPlayerBattleEquipment =
+             new HashSet<object>(ReferenceObjectComparer.Instance);
+-        private static readonly bool CompanionSetSupportInstalled =
+-            TryInstallCompanionSetSupport();
+ 
+         private static object _companionSetCampaignSession;
+         private static object _companionSetSnapshotMainHero;
+@@ -35,6 +33,7 @@ namespace TORCareerUniques
+         private static bool _forceFullCompanionSetSnapshot = true;
+         private static bool _companionSetRefreshInProgress;
+         private static bool _internalCompanionCarrierMutation;
++        private static bool _companionSetSupportInstallAttempted;
+ 
+         private sealed class HeroSetSnapshot
+         {
+@@ -78,6 +77,14 @@ namespace TORCareerUniques
+             }
+         }
+ 
++        internal static void InitializeCompanionSetSupport()
++        {
++            if (_companionSetSupportInstallAttempted)
++                return;
++            _companionSetSupportInstallAttempted = true;
++            TryInstallCompanionSetSupport();
++        }
++
+         private static bool TryInstallCompanionSetSupport()
+         {
+             try
+@@ -1143,11 +1150,20 @@ namespace TORCareerUniques
+ 
+         private static void BeforeRuntimeEquipmentMutation(object __0)
+         {
+-            if (_internalCompanionCarrierMutation)
++            // Equipment mutations occur throughout Bannerlord while parties, troops,
++            // encounters and mission agents are initialized. Only a living player-clan
++            // hero edited from the inventory screen can invalidate this cache.
++            if (_internalCompanionCarrierMutation || __0 == null ||
++                !IsCompanionInventoryStateActive())
+                 return;
++
+             EnsureCompanionSetSession();
+-            if (__0 != null)
+-                DirtyPlayerBattleEquipment.Add(__0);
++            if (FindPlayerHeroByBattleEquipment(__0) == null)
++                return;
++
++            // Preserve every unaffected hero snapshot. EnsureCurrentPlayerHeroSnapshots
++            // replaces only the snapshot whose exact BattleEquipment object is dirty.
++            DirtyPlayerBattleEquipment.Add(__0);
+             _companionSetSnapshotDirty = true;
+         }
+ 
+diff --git a/src/TORCareerUniques/CompanionSetSafety.cs b/src/TORCareerUniques/CompanionSetSafety.cs
+deleted file mode 100644
+index a178f72..0000000
+--- a/src/TORCareerUniques/CompanionSetSafety.cs
++++ /dev/null
+@@ -1,67 +0,0 @@
+-using System;
+-using System.Collections.Generic;
+-using System.Reflection;
+-
+-namespace TORCareerUniques
+-{
+-    internal static partial class SetItemRuntime
+-    {
+-        private const string CompanionMixedGearSafetyHarmonyId =
+-            "torcareeruniques.sets.companion-mixed-gear-safety";
+-
+-        private static readonly bool CompanionMixedGearSafetyInstalled =
+-            TryInstallCompanionMixedGearSafety();
+-
+-        private static bool TryInstallCompanionMixedGearSafety()
+-        {
+-            try
+-            {
+-                Type harmonyType = FindCrossCultureHarmonyType(
+-                    "HarmonyLib.Harmony", "0Harmony");
+-                Type harmonyMethodType = FindCrossCultureHarmonyType(
+-                    "HarmonyLib.HarmonyMethod", "0Harmony");
+-                if (harmonyType == null || harmonyMethodType == null)
+-                    throw new TypeLoadException(
+-                        "HarmonyLib is unavailable while installing companion mixed-gear safety.");
+-
+-                MethodInfo original = FindCompanionSetMethod(
+-                    typeof(SetItemRuntime), "ScanHeroSetState", 2,
+-                    BindingFlags.NonPublic | BindingFlags.Static);
+-                MethodInfo postfix = typeof(SetItemRuntime).GetMethod(
+-                    nameof(RemovePersistentHeroCarriersFromCompanionState),
+-                    BindingFlags.NonPublic | BindingFlags.Static);
+-                object harmony = Activator.CreateInstance(harmonyType,
+-                    new object[] { CompanionMixedGearSafetyHarmonyId });
+-                PatchCompanionSetMethod(harmonyType, harmonyMethodType, harmony,
+-                    original, null, postfix);
+-                return true;
+-            }
+-            catch (Exception ex)
+-            {
+-                ModLog.Error("Companion mixed-gear safety could not be installed. " +
+-                    ex.GetType().Name + ": " + ex.Message);
+-                return false;
+-            }
+-        }
+-
+-        private static void RemovePersistentHeroCarriersFromCompanionState(
+-            object __0, bool __1,
+-            Dictionary<string, EquippedSetState> __result)
+-        {
+-            if (__1 || __result == null || __result.Count == 0)
+-                return;
+-
+-            foreach (EquippedSetState state in __result.Values)
+-            {
+-                for (int i = state.EquippedItems.Count - 1; i >= 0; i--)
+-                {
+-                    EquippedItemRef equipped = state.EquippedItems[i];
+-                    if (equipped == null || String.IsNullOrEmpty(equipped.ItemId))
+-                        continue;
+-                    if (HasHeroSignature(GetItemTraits(equipped.ItemId)))
+-                        state.EquippedItems.RemoveAt(i);
+-                }
+-            }
+-        }
+-    }
+-}
+diff --git a/src/TORCareerUniques/ModInfrastructure.cs b/src/TORCareerUniques/ModInfrastructure.cs
+index 4f78835..ba3f8a2 100644
+--- a/src/TORCareerUniques/ModInfrastructure.cs
++++ b/src/TORCareerUniques/ModInfrastructure.cs
+@@ -25,6 +25,7 @@ namespace TORCareerUniques
+             EncounterHeroDeathGuard.Initialize();
+             CareerUniqueRuntime.Initialize();
+             SetItemRuntime.Initialize();
++            SetItemRuntime.InitializeCompanionSetSupport();
+             InventorySetTooltipBridge.Initialize();
+             RuntimePerformanceGate.Initialize();
+             EncounterAffinityRuntime.Initialize();
