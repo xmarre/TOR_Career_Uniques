@@ -1,9 +1,10 @@
-## TOR Career Uniques v1.7.34
+## TOR Career Uniques v1.7.35
 
-- Fixed inventory-selectable companions still being absent when their Hero was not synchronized into the normal clan collections.
-- Main-party roster heroes are now included directly for companion set snapshots and equipment ownership.
-- Set tooltips now reconcile stale companion equipment snapshots against the live equipped item and immediately refresh the companion's piece and tier bonuses.
-- Both normal career-set items and `[ADMIN COPY]` sets use the same corrected path.
-- No campaign-map polling, per-frame clan scans, or equipment fingerprint checks were added.
+- Greatly reduced save-load work introduced by the v1.7.29 and later encounter-visual repairs.
+- Existing set items now validate their saved visual base through Bannerlord's indexed object lookup instead of rebuilding complete career outfits from the global character and item catalogues on every load.
+- The expensive culture/role resolver still runs when a legacy item is missing, uses the wrong slot, has an incompatible relic kind, or when an incomplete encounter hero genuinely needs repair.
+- Already validated persistent encounter heroes no longer rebuild their TOR career and template capabilities twice during one session launch.
+- The confirmed Grey Lord/Cowl fix, cross-culture fallback, exact-slot validation, caster weight cap, and transactional recovery remain intact.
+- No campaign-map polling or continuous scans were added.
 
 Install by completely deleting the old `Modules/TORCareerUniques` folder, then extract the clean archive into the Bannerlord root directory.
