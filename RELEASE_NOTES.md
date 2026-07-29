@@ -1,10 +1,9 @@
-## TOR Career Uniques v1.7.32
+## TOR Career Uniques v1.7.33
 
-- Ordinary companions and other living player-clan heroes now activate their own career-set piece effects and cumulative 2/5–5/5 bonuses.
-- Each hero's equipment is evaluated independently; set pieces can never combine across different characters.
-- Set tooltips now show the equipped owner's active set state when the inspected piece belongs to a companion.
-- Recruited encounter heroes retain their already embedded equipment payload without receiving duplicate runtime bonuses.
-- Mastery, recognition, and recruitment requirements remain tied to the currently controlled hero.
-- Refreshes remain event-driven on session launch, inventory entry, equipment changes, and companion-roster changes. No campaign-map polling or equipment fingerprint scans were added.
+- Fixed career sets equipped by ordinary companions incorrectly showing `0/5` and leaving every set bonus locked.
+- Companion equipment is now discovered through Bannerlord's dedicated companion collection as well as the normal clan-hero collections.
+- Both real career-set items and `[ADMIN COPY]` test sets now resolve the equipped companion as their owner and activate the correct piece and tier bonuses.
+- Player-clan hero enumeration is deduplicated and remains limited to existing session, inventory, equipment-change, and roster-change refresh events.
+- No campaign-map polling, continuous scans, or equipment fingerprint checks were added.
 
 Install by completely deleting the old `Modules/TORCareerUniques` folder, then extract the clean archive into the Bannerlord root directory.

@@ -438,12 +438,7 @@ namespace TORCareerUniques
             }
 
             Clan playerClan = Clan.PlayerClan;
-            IEnumerable clanHeroes = playerClan == null ? null :
-                GetProperty(playerClan, "Heroes") as IEnumerable;
-            if (clanHeroes == null)
-                return;
-
-            foreach (object hero in clanHeroes)
+            foreach (object hero in EnumeratePlayerClanHeroes(playerClan))
             {
                 if (hero == null || visited.Contains(hero))
                     continue;
