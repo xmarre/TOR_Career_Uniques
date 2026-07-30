@@ -2,7 +2,7 @@
 <Module>
   <Name value="TOR Career Uniques" />
   <Id value="TORCareerUniques" />
-    <Version value="v1.7.38" />
+    <Version value="v1.7.39" />
   <DefaultModule value="false" />
   <SingleplayerModule value="true" />
   <Official value="false" />
@@ -28,6 +28,12 @@
       <Name value="TOR Career Uniques - Shared Encounter Clan" />
       <DLLName value="TORCareerUniques.dll" />
       <SubModuleClassType value="TORCareerUniques.SharedEncounterClanSubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
+      <Name value="TOR Career Uniques - Legacy Clan Migration Guard" />
+      <DLLName value="TORCareerUniques.dll" />
+      <SubModuleClassType value="TORCareerUniques.LegacyEncounterClanMigrationGuardSubModule" />
       <Tags />
     </SubModule>
     <SubModule>
