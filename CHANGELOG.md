@@ -1,3 +1,11 @@
+## 1.7.39
+
+- Fixed Bannerlord's "clan was destroyed" notifications repeating on every load after the v1.7.38 legacy-clan migration.
+- Added a TORCU-owned migration marker that is serialized with the campaign and prevents the native clan-destruction action from running again after a successful migration.
+- Existing v1.7.38 saves whose legacy clans are already empty are recognized as migrated without replaying destruction notifications.
+- Genuine unmigrated saves still run the complete shared-clan migration once, then persist completion.
+- Retains the shared-clan load-time improvement with no campaign-map polling or recurring clan scans.
+
 ## 1.7.38
 
 - Replaced the 22 serialized per-career encounter clans with one shared leader-backed encounter clan.
