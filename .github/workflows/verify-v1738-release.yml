@@ -1,0 +1,45 @@
+name: Verify v1.7.38 release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-v1738-release.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify release assets and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          tag="v1.7.38"
+          clean="TOR_Career_Uniques_v1.7.38_Bannerlord_1.3.15_TOR_1.16_CLEAN.zip"
+          source="TOR_Career_Uniques_v1.7.38_FULL_SOURCE_Bannerlord_1.3.15_TOR_1.16.zip"
+
+          gh release view "$tag" --repo "$repo" \
+            --json tagName,isDraft,isPrerelease,targetCommitish,assets > release.json
+          test "$(jq -r '.tagName' release.json)" = "$tag"
+          test "$(jq -r '.isDraft' release.json)" = "false"
+          test "$(jq -r '.isPrerelease' release.json)" = "false"
+          jq -e --arg name "SHA256SUMS.txt" '.assets | any(.name == $name)' release.json >/dev/null
+          jq -e --arg name "$clean" '.assets | any(.name == $name)' release.json >/dev/null
+          jq -e --arg name "$source" '.assets | any(.name == $name)' release.json >/dev/null
+          test "$(jq '.assets | length' release.json)" -eq 3
+
+          mkdir release
+          gh release download "$tag" --repo "$repo" --dir release
+          cd release
+          sha256sum -c SHA256SUMS.txt | tee verification.txt
+
+          printf 'tag=%s\nassets=%s\n' "$tag" \
+            "$(jq -r '.assets[].name' ../release.json | paste -sd, -)"
