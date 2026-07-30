@@ -1,3 +1,11 @@
+## 1.7.38
+
+- Replaced the 22 serialized per-career encounter clans with one shared leader-backed encounter clan.
+- Existing saves migrate every encounter hero and active encounter party to the shared clan, then remove only legacy clans verified to have no remaining heroes, parties, or settlements.
+- The first load of an old save still deserializes its legacy faction graph; save once after migration so subsequent loads contain only one TORCU encounter clan.
+- Preserved conversation-safe leadership, party-specific cultural affinity, forced hostility, recruitment, successors, and the Grey Lord/Cowl load repair.
+- Added no campaign-map polling, per-frame scans, or recurring clan migration work.
+
 ## 1.7.37
 
 - Added a temporary pre-session guard for TORCU encounter clans whose intentionally absent naval party template can be queried by native/TOR load paths before the existing bandit classifier guard runs.
