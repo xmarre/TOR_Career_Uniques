@@ -2,9 +2,9 @@ name: Temporary shared-clan source runner
 
 on:
   push:
-    branches: [agent/collapse-encounter-clans]
+    branches: [main]
     paths:
-      - '.github/shared-clan-v1738.trigger'
+      - '.github/temp-shared-clan-runner.trigger'
 
 permissions:
   contents: write
@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: agent/collapse-encounter-clans
           fetch-depth: 0
       - name: Execute staged applicator and tighten leader invariant
         shell: bash
