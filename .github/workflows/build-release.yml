@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
@@ -93,14 +97,30 @@ jobs:
           commit_subject=$(printf '%s\n' "$COMMIT_MESSAGE" | sed -n '1p' | tr -d '\r')
           test "$commit_subject" = "Release $tag"
 
+          release_exists=false
+          if gh release view "$tag" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
           if existing_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
-            test "$existing_sha" = "$GITHUB_SHA"
+            if [ "$existing_sha" != "$GITHUB_SHA" ]; then
+              if [ "$release_exists" = true ]; then
+                echo "Release $tag already exists at $existing_sha; duplicate trigger from $GITHUB_SHA is a successful no-op."
+                exit 0
+              fi
+              echo "::error::Tag $tag points to $existing_sha instead of $GITHUB_SHA, and no published release exists."
+              exit 1
+            fi
           else
+            if [ "$release_exists" = true ]; then
+              echo "::error::Release $tag exists but its Git tag could not be resolved."
+              exit 1
+            fi
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
           fi
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; leaving it unchanged."
+          if [ "$release_exists" = true ]; then
+            echo "Release $tag already exists on the expected commit; leaving it unchanged."
           else
             gh release create "$tag" artifacts/release/* --title "TOR Career Uniques $tag" --notes-file RELEASE_NOTES.md --verify-tag
           fi
