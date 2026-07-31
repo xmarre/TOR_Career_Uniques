@@ -25,6 +25,12 @@
       <Tags />
     </SubModule>
     <SubModule>
+      <Name value="TOR Career Uniques - Encounter Runtime Extensions" />
+      <DLLName value="TORCareerUniques.dll" />
+      <SubModuleClassType value="TORCareerUniques.EncounterRuntimeExtensionsSubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
       <Name value="TOR Career Uniques - Shared Encounter Clan" />
       <DLLName value="TORCareerUniques.dll" />
       <SubModuleClassType value="TORCareerUniques.SharedEncounterClanSubModule" />
