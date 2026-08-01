@@ -1,3 +1,12 @@
+## 1.7.40
+
+- Restored lore-based non-aggression for roaming hosts after the shared-clan migration by rejecting protected direct and retained engage commands in both directions.
+- Reused the existing once-per-session affinity cache and retained the single shared encounter clan without adding save-load scans, campaign-map polling, or recurring faction work.
+- Added separate 25%-300% MCM controls for roaming-host and guardian-location base strength.
+- Kept collection and veteran escalation multiplicative with the selected base strength; the default remains 100%.
+- Applies changed host strength on respawn or roster rebuild and changed guardian strength whenever defenders materialize.
+- Validated the relation and strength behavior in Bannerlord v1.3.15.
+
 ## 1.7.39
 
 - Fixed Bannerlord's "clan was destroyed" notifications repeating on every load after the v1.7.38 legacy-clan migration.
