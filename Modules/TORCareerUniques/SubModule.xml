@@ -2,7 +2,7 @@
 <Module>
   <Name value="TOR Career Uniques" />
   <Id value="TORCareerUniques" />
-    <Version value="v1.7.39" />
+    <Version value="v1.7.40" />
   <DefaultModule value="false" />
   <SingleplayerModule value="true" />
   <Official value="false" />
@@ -22,6 +22,12 @@
       <Name value="TOR Career Uniques" />
       <DLLName value="TORCareerUniques.dll" />
       <SubModuleClassType value="TORCareerUniques.SubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
+      <Name value="TOR Career Uniques - Encounter Runtime Extensions" />
+      <DLLName value="TORCareerUniques.dll" />
+      <SubModuleClassType value="TORCareerUniques.EncounterRuntimeExtensionsSubModule" />
       <Tags />
     </SubModule>
     <SubModule>
