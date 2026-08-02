@@ -29,7 +29,22 @@ jobs:
           end = text.index(end_marker, start)
           lines = text[start:end].splitlines()
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          old = "assert relic.count(audit_class) == 1\nrelic = relic.replace(audit_class, occurrence_class)"
+          new = "relic, count = re.subn(r'        private sealed class PendingGrantAudit\\n        \\{.*?        \\}\\n', occurrence_class, relic, count=1, flags=re.S)\nassert count == 1, 'pending audit class was not replaced exactly once'"
+          if old not in code:
+              raise RuntimeError('Expected pending-audit replacement block is absent.')
+          code = code.replace(old, new)
           exec(compile(code, str(workflow), 'exec'), {'__name__': '__main__'})
+          for path in Path('.patch').glob('*') if Path('.patch').exists() else []:
+              path.unlink()
+          if Path('.patch').exists():
+              Path('.patch').rmdir()
+          for temporary in (
+              '.github/workflows/trigger-relic-recovery-v2.yml',
+              '.github/workflows/pr-relic-recovery-v2.yml'):
+              candidate = Path(temporary)
+              if candidate.exists():
+                  candidate.unlink()
       - name: Commit corrected implementation
         shell: bash
         run: |
