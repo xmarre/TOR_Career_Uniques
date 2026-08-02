@@ -42,6 +42,20 @@ jobs:
               raise RuntimeError('Expected audit-log replacement block is absent.')
           code = code.replace(old, new)
 
+          old = """relic, count = re.subn(
+    r'        internal static void RepairFromMcm\\(\\).*?        private static string DescribeItem',
+    repair_block,
+    relic,
+    flags=re.S)
+assert count == 1, 'repair implementation was not replaced exactly once'"""
+          new = """repair_start = relic.index('        internal static void RepairFromMcm()')
+repair_marker = '        private static string DescribeItem'
+repair_end = relic.index(repair_marker, repair_start)
+relic = relic[:repair_start] + repair_block + relic[repair_end + len(repair_marker):]"""
+          if old not in code:
+              raise RuntimeError('Expected repair implementation replacement block is absent.')
+          code = code.replace(old, new)
+
           exec(compile(code, str(workflow), 'exec'), {'__name__': '__main__'})
           for path in Path('.patch').glob('*') if Path('.patch').exists() else []:
               path.unlink()
