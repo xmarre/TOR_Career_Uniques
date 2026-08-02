@@ -1,0 +1,52 @@
+name: Cleanup recovery patch
+
+on:
+  push:
+    branches:
+      - fix/relic-reward-inventory-integrity
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Apply bounded source corrections
+        shell: python
+        run: |
+          import pathlib
+          import re
+          import subprocess
+
+          audit_class = (
+              "        private sealed class PendingGrantAudit\n"
+              "        {\n"
+              "        }\n")
+          occurrence_class = audit_class
+          old_tick = (
+              "                if (restored)\n"
+              "                {\n"
+              "                }\n"
+              "                else if (audit.Attempts >= 3)")
+          new_tick = old_tick
+          relic = audit_class + old_tick
+          assert relic.count(audit_class) == 1
+          relic = relic.replace(audit_class, occurrence_class)
+          assert relic.count(old_tick) == 1
+          relic = relic.replace(old_tick, new_tick)
+
+          subprocess.run([
+              'git', 'checkout', 'origin/main', '--',
+              'src/TORCareerUniques/CompanionSetLiveReconcile.cs'
+          ], check=True)
+          pathlib.Path('.github/workflows/apply-relic-recovery-v2.yml').unlink()
+      - name: Commit corrected implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Restore untouched companion reconciliation source"
+          git push origin HEAD:fix/relic-reward-inventory-integrity
