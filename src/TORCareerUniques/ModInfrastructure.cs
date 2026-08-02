@@ -74,11 +74,13 @@ namespace TORCareerUniques
     {
         private static readonly Action RespawnMissingAction =
             AdminBridge.RespawnMissing;
+        private static readonly Action RepairMissingRecoveredRelicsAction =
+            RelicRewardIntegrity.RepairFromMcm;
         public override string Id { get { return "TORCareerUniques_v1_1"; } }
         public override string DisplayName { get { return "TOR Career Uniques"; } }
         public override string FolderName { get { return "TORCareerUniques"; } }
         public override string FormatType { get { return "json2"; } }
-        public override int UIVersion { get { return 10; } }
+        public override int UIVersion { get { return 11; } }
 
         // Gauntlet reads visible DataSource properties repeatedly.  Keep those
         // reads in this in-memory view model; persistence belongs in setters and
@@ -195,6 +197,15 @@ namespace TORCareerUniques
                 _verboseLogging = value;
                 PersistentConfig.VerboseLogging = value;
             }
+        }
+
+        [SettingPropertyButton("Repair missing recovered relics", 19, false,
+            "Scans every living character, hero equipment set, mobile-party inventory, settlement inventory and stash before restoring anything. Existing relics are never moved. It also removes the single duplicate that the previous faulty recovery build could place in the active main inventory while the original remained on another character.", Content = "Repair now")]
+        [SettingPropertyGroup("Relic Encounters & Testing", GroupOrder = 2)]
+        public Action RepairMissingRecoveredRelics
+        {
+            get { return RepairMissingRecoveredRelicsAction; }
+            set { }
         }
 
         [SettingPropertyButton("Respawn missing encounters", 20, false,

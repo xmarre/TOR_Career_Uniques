@@ -3,9 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using MCM.Abstractions.Attributes;
-using MCM.Abstractions.Attributes.v2;
-using MCM.Abstractions.Base.Global;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
@@ -37,65 +34,18 @@ namespace TORCareerUniques
         }
     }
 
-    public sealed class RelicRewardRecoverySettings :
-        AttributeGlobalSettings<RelicRewardRecoverySettings>
-    {
-        private static readonly Action RepairAction =
-            RelicRewardIntegrity.RepairFromMcm;
-
-        public override string Id
-        {
-            get { return "TORCareerUniques_RelicRecovery_v1"; }
-        }
-
-        public override string DisplayName
-        {
-            get { return "TOR Career Uniques - Recovery"; }
-        }
-
-        public override string FolderName
-        {
-            get { return "TORCareerUniques"; }
-        }
-
-        public override string FormatType
-        {
-            get { return "json2"; }
-        }
-
-        public override int UIVersion
-        {
-            get { return 1; }
-        }
-
-        [SettingPropertyButton("Repair missing recovered relics", 0, false,
-            "Checks recovered career weapons that are absent from every player-owned inventory and equipment slot. If the exact runtime item was transferred to another party after a reinforced battle, it is reclaimed with its modifier; otherwise the saved relic is restored with a fresh quality roll.",
-            Content = "Repair now")]
-        [SettingPropertyGroup("Relic reward recovery", GroupOrder = 0)]
-        public Action RepairMissingRecoveredRelics
-        {
-            get { return RepairAction; }
-            set { }
-        }
-    }
-
     internal static class RelicRewardIntegrity
     {
         private const string HarmonyId =
-            "torcareeruniques.rewards.inventory-integrity.1.7.41";
+            "torcareeruniques.rewards.inventory-integrity.1.7.41.v2";
+
         private static readonly List<PendingGrantAudit> PendingAudits =
             new List<PendingGrantAudit>();
+
         private static bool _installed;
         private static bool _restoring;
         private static bool _screenDeferralLogged;
         private static object _campaignSession;
-
-        private enum OwnershipState
-        {
-            Unknown,
-            NotOwned,
-            Owned
-        }
 
         private sealed class InsertState
         {
@@ -107,10 +57,22 @@ namespace TORCareerUniques
         {
             internal ItemObject Item;
             internal ItemModifier Modifier;
-            internal int ExpectedCount;
+            internal int ExpectedGlobalCount;
             internal string CareerId;
             internal float Delay;
             internal int Attempts;
+        }
+
+        private sealed class RelicOccurrence
+        {
+            internal ItemObject Item;
+            internal ItemModifier Modifier;
+            internal ItemRoster Roster;
+            internal EquipmentElement Element;
+            internal int Amount;
+            internal string Location;
+            internal bool IsMainRoster;
+            internal bool IsEquipment;
         }
 
         internal static void Initialize()
@@ -162,8 +124,9 @@ namespace TORCareerUniques
                     });
                 _installed = true;
                 ModLog.AlwaysInfo(
-                    "Installed reward inventory integrity verification, post-loot " +
-                    "ownership auditing, and inventory-screen reward deferral.");
+                    "Installed reward inventory integrity verification, global " +
+                    "post-loot ownership auditing, and inventory-screen reward " +
+                    "deferral. Existing relics are never moved between owners.");
             }
             catch (Exception ex)
             {
@@ -202,42 +165,67 @@ namespace TORCareerUniques
                 if (audit.Delay > 0f)
                     continue;
 
-                ItemRoster mainRoster = MobileParty.MainParty == null ? null :
-                    MobileParty.MainParty.ItemRoster;
-                bool supported;
-                int current = CountExactStack(mainRoster, audit.Item,
-                    audit.Modifier, out supported);
-                if (supported && current >= audit.ExpectedCount)
+                int globalCount;
+                string locations;
+                string scanError;
+                if (!TryCountExactStackGlobally(audit.Item, audit.Modifier,
+                    out globalCount, out locations, out scanError))
+                {
+                    audit.Attempts++;
+                    if (audit.Attempts >= 3)
+                    {
+                        ModLog.Error("Post-loot ownership audit for '" +
+                            DescribeItem(audit.Item, audit.Modifier) +
+                            "' was abandoned after three bounded scan failures: " +
+                            scanError + ". No item was moved or duplicated.");
+                        PendingAudits.RemoveAt(i);
+                    }
+                    else
+                    {
+                        audit.Delay = 1f;
+                    }
+                    continue;
+                }
+
+                if (globalCount >= audit.ExpectedGlobalCount)
                 {
                     ModLog.Info("Post-loot ownership audit retained '" +
-                        DescribeItem(audit.Item, audit.Modifier) + "'.");
+                        DescribeItem(audit.Item, audit.Modifier) + "' at " +
+                        (String.IsNullOrEmpty(locations) ?
+                            "an owned inventory or equipment slot" : locations) +
+                        ". No item was moved or duplicated.");
                     PendingAudits.RemoveAt(i);
                     continue;
                 }
 
-                audit.Attempts++;
-                string source;
-                bool restored = RestoreAuditedGrant(audit, out source);
-                if (restored)
+                int missing = audit.ExpectedGlobalCount - globalCount;
+                string restoreError;
+                if (RestoreExactAuditedStack(audit.Item, audit.Modifier,
+                    missing, out restoreError))
                 {
-                    ModLog.AlwaysInfo("Post-loot ownership audit restored '" +
-                        DescribeItem(audit.Item, audit.Modifier) + "'" +
-                        (String.IsNullOrEmpty(source) ? String.Empty :
-                            " after reclaiming it from " + source) +
-                        ". Recovery state remains valid.");
-                    PendingAudits.RemoveAt(i);
-                }
-                else if (audit.Attempts >= 3)
-                {
-                    ModLog.Error("Post-loot ownership audit could not restore '" +
+                    ModLog.AlwaysInfo("Post-loot ownership audit restored " +
+                        missing + " missing stack(s) of '" +
                         DescribeItem(audit.Item, audit.Modifier) +
-                        "' after three bounded attempts. Use the MCM recovery " +
-                        "button and retain the log.");
+                        "' after the transaction boundary deleted them. " +
+                        "No existing owner was modified.");
                     PendingAudits.RemoveAt(i);
                 }
                 else
                 {
-                    audit.Delay = 1f;
+                    audit.Attempts++;
+                    if (audit.Attempts >= 3)
+                    {
+                        ModLog.Error("Post-loot ownership audit could not restore '" +
+                            DescribeItem(audit.Item, audit.Modifier) +
+                            "' after three bounded attempts: " + restoreError +
+                            ". Use the recovery button in the existing TOR Career " +
+                            "Uniques MCM page and retain the log.");
+                        PendingAudits.RemoveAt(i);
+                    }
+                    else
+                    {
+                        audit.Delay = 1f;
+                    }
                 }
             }
         }
@@ -325,21 +313,34 @@ namespace TORCareerUniques
                 (modifier == null || relicModifier != null) &&
                 TryGetRealRelicCareer(relic, out careerId))
             {
-                QueuePostLootAudit(relic, relicModifier, after, careerId);
+                QueuePostLootAudit(relic, relicModifier, count, careerId);
             }
         }
 
         private static void QueuePostLootAudit(ItemObject item,
-            ItemModifier modifier, int expectedCount, string careerId)
+            ItemModifier modifier, int addedCount, string careerId)
         {
+            int globalBefore;
+            string ignoredLocations;
+            string ignoredError;
+            if (!TryCountExactStackGlobally(item, modifier, out globalBefore,
+                out ignoredLocations, out ignoredError))
+            {
+                globalBefore = CountExactStack(
+                    MobileParty.MainParty == null ? null :
+                        MobileParty.MainParty.ItemRoster,
+                    item, modifier, out _);
+            }
+
+            int expected = Math.Max(addedCount, globalBefore);
             for (int i = 0; i < PendingAudits.Count; i++)
             {
                 PendingGrantAudit existing = PendingAudits[i];
                 if (Object.ReferenceEquals(existing.Item, item) &&
                     Object.ReferenceEquals(existing.Modifier, modifier))
                 {
-                    existing.ExpectedCount = Math.Max(existing.ExpectedCount,
-                        expectedCount);
+                    existing.ExpectedGlobalCount = Math.Max(
+                        existing.ExpectedGlobalCount, expected);
                     existing.Delay = 1f;
                     existing.Attempts = 0;
                     return;
@@ -350,112 +351,37 @@ namespace TORCareerUniques
             {
                 Item = item,
                 Modifier = modifier,
-                ExpectedCount = expectedCount,
+                ExpectedGlobalCount = expected,
                 CareerId = careerId,
                 Delay = 1f,
                 Attempts = 0
             });
         }
 
-        private static bool RestoreAuditedGrant(PendingGrantAudit audit,
-            out string source)
+        private static bool RestoreExactAuditedStack(ItemObject item,
+            ItemModifier modifier, int count, out string error)
         {
-            source = null;
-            if (audit == null || audit.Item == null ||
-                MobileParty.MainParty == null ||
+            error = null;
+            if (item == null || count <= 0 || MobileParty.MainParty == null ||
                 MobileParty.MainParty.ItemRoster == null)
+            {
+                error = "The exact audited item or main inventory is unavailable.";
                 return false;
-
-            ItemRoster sourceRoster;
-            EquipmentElement sourceElement;
-            if (TryDetachExactStackFromExternalParty(audit.Item,
-                audit.Modifier, out sourceRoster, out sourceElement,
-                out source))
-            {
-                string error;
-                bool added;
-                _restoring = true;
-                try
-                {
-                    added = CareerUniqueRuntime.AddToRoster(
-                        MobileParty.MainParty.ItemRoster, audit.Item,
-                        audit.Modifier, 1, out error);
-                }
-                finally
-                {
-                    _restoring = false;
-                }
-                if (!added)
-                {
-                    sourceRoster.AddToCounts(sourceElement, 1);
-                    ModLog.Error("Could not reclaim post-battle relic from " +
-                        source + ": " +
-                        (error ?? "inventory insertion failed") + ".");
-                    source = null;
-                    return false;
-                }
-            }
-            else
-            {
-                string error;
-                bool added;
-                _restoring = true;
-                try
-                {
-                    added = CareerUniqueRuntime.AddToRoster(
-                        MobileParty.MainParty.ItemRoster, audit.Item,
-                        audit.Modifier, 1, out error);
-                }
-                finally
-                {
-                    _restoring = false;
-                }
-                if (!added)
-                {
-                    ModLog.Error("Could not restore post-battle relic: " +
-                        (error ?? "inventory insertion failed") + ".");
-                    return false;
-                }
             }
 
-            bool supported;
-            int current = CountExactStack(
-                MobileParty.MainParty.ItemRoster, audit.Item,
-                audit.Modifier, out supported);
-            return supported && current >= audit.ExpectedCount;
-        }
-
-        private static bool TryDetachExactStackFromExternalParty(
-            ItemObject item, ItemModifier modifier, out ItemRoster sourceRoster,
-            out EquipmentElement sourceElement, out string sourceName)
-        {
-            sourceRoster = null;
-            sourceElement = default(EquipmentElement);
-            sourceName = null;
-            if (item == null)
-                return false;
-
-            foreach (MobileParty party in MobileParty.All)
+            bool added;
+            _restoring = true;
+            try
             {
-                if (party == null || !party.IsActive ||
-                    Object.ReferenceEquals(party, MobileParty.MainParty) ||
-                    party.ItemRoster == null)
-                    continue;
-
-                EquipmentElement found;
-                if (!TryFindExactStack(party.ItemRoster, item, modifier,
-                    out found))
-                    continue;
-
-                party.ItemRoster.AddToCounts(found, -1);
-                sourceRoster = party.ItemRoster;
-                sourceElement = found;
-                sourceName = (party.Name == null ? party.StringId :
-                    party.Name.ToString()) + " (" +
-                    (party.StringId ?? "<no-id>") + ")";
-                return true;
+                added = CareerUniqueRuntime.AddToRoster(
+                    MobileParty.MainParty.ItemRoster, item, modifier, count,
+                    out error);
             }
-            return false;
+            finally
+            {
+                _restoring = false;
+            }
+            return added;
         }
 
         private static bool TryFindExactStack(ItemRoster roster,
@@ -496,7 +422,7 @@ namespace TORCareerUniques
                 EquipmentElement equipment = element.EquipmentElement;
                 if (Object.ReferenceEquals(equipment.Item, item) &&
                     Object.ReferenceEquals(equipment.ItemModifier, modifier))
-                    count += element.Amount;
+                    count += Math.Max(0, element.Amount);
             }
             supported = true;
             return count;
@@ -612,124 +538,460 @@ namespace TORCareerUniques
                     "loaded.";
             }
 
-            Dictionary<string, ItemObject> orphanByCareer;
-            string scanError;
-            if (!TryFindOrphanedRelics(out orphanByCareer, out scanError))
-                return scanError;
-            if (orphanByCareer.Count == 0)
+            List<string> repaired = new List<string>();
+            List<string> preserved = new List<string>();
+            List<string> cleaned = new List<string>();
+            List<string> failed = new List<string>();
+            string[] careers = SetItemRuntime.GetCareerIds();
+            for (int i = 0; i < careers.Length; i++)
             {
-                return "No recovered-but-unowned relic reward was found to " +
-                    "repair.";
+                string careerId = careers[i];
+                if (!AdminBridge.HasDiscoveredSetPiece(careerId, 0))
+                    continue;
+
+                List<RelicOccurrence> occurrences;
+                string scanError;
+                if (!TryScanRelicOccurrences(careerId, out occurrences,
+                    out scanError))
+                {
+                    failed.Add(careerId + ": " + scanError);
+                    continue;
+                }
+
+                string cleanedName;
+                if (TryRemovePreviousRecoveryDuplicate(careerId, occurrences,
+                    out cleanedName))
+                {
+                    cleaned.Add(cleanedName);
+                    if (!TryScanRelicOccurrences(careerId, out occurrences,
+                        out scanError))
+                    {
+                        failed.Add(careerId + ": post-cleanup scan failed: " +
+                            scanError);
+                        continue;
+                    }
+                }
+
+                if (occurrences.Count > 0)
+                {
+                    preserved.Add(CareerUniqueRuntime.GetItemName(careerId) +
+                        " already exists at " +
+                        FormatOccurrenceLocations(occurrences));
+                    continue;
+                }
+
+                string restoredName;
+                string source;
+                string restoreError;
+                if (TryRestoreMissingRelic(careerId, out restoredName,
+                    out source, out restoreError))
+                {
+                    repaired.Add(restoredName + " (" + source + ")");
+                }
+                else
+                {
+                    failed.Add(careerId + ": " + restoreError);
+                }
             }
 
-            List<string> repaired = new List<string>();
-            List<string> failed = new List<string>();
-            foreach (KeyValuePair<string, ItemObject> pair in orphanByCareer)
+            SetItemRuntime.Tick();
+            List<string> sections = new List<string>();
+            if (cleaned.Count > 0)
             {
-                ItemObject item = pair.Value;
-                ItemModifier modifier;
-                ItemRoster sourceRoster;
-                EquipmentElement sourceElement;
-                string source;
-                bool reclaimed = TryDetachAnyStackFromExternalParty(item,
-                    out modifier, out sourceRoster, out sourceElement,
-                    out source);
-                if (!reclaimed)
-                    modifier = CareerUniqueRuntime.RollLootModifier(item) as ItemModifier;
+                sections.Add("Removed duplicate(s) created by the previous faulty " +
+                    "recovery build: " + String.Join(", ", cleaned.ToArray()) +
+                    ". The original copies were left on their existing characters.");
+            }
+            if (repaired.Count > 0)
+            {
+                sections.Add("Restored genuinely missing recovered relic(s): " +
+                    String.Join(", ", repaired.ToArray()) + ".");
+            }
+            if (preserved.Count > 0)
+            {
+                sections.Add("Existing relics were not moved or duplicated: " +
+                    String.Join("; ", preserved.ToArray()) + ".");
+            }
+            if (failed.Count > 0)
+            {
+                sections.Add("Could not safely repair: " +
+                    String.Join("; ", failed.ToArray()) + ".");
+            }
+            if (sections.Count == 0)
+                sections.Add("No recovered relic required repair.");
 
-                string error;
+            string result = String.Join("\n\n", sections.ToArray());
+            ModLog.AlwaysInfo(result.Replace("\n", " "));
+            return result;
+        }
+
+        private static bool TryRemovePreviousRecoveryDuplicate(
+            string careerId, List<RelicOccurrence> occurrences,
+            out string removedName)
+        {
+            removedName = null;
+            if (occurrences == null)
+                return false;
+
+            RelicOccurrence main = null;
+            int mainAmount = 0;
+            bool exactObjectExistsOutsideMain = false;
+            for (int i = 0; i < occurrences.Count; i++)
+            {
+                RelicOccurrence occurrence = occurrences[i];
+                if (occurrence.IsMainRoster)
+                {
+                    mainAmount += Math.Max(0, occurrence.Amount);
+                    if (main == null)
+                        main = occurrence;
+                }
+            }
+            if (main == null || mainAmount != 1 || main.Amount != 1 ||
+                main.Roster == null)
+                return false;
+
+            for (int i = 0; i < occurrences.Count; i++)
+            {
+                RelicOccurrence occurrence = occurrences[i];
+                if (!occurrence.IsMainRoster &&
+                    Object.ReferenceEquals(occurrence.Item, main.Item))
+                {
+                    exactObjectExistsOutsideMain = true;
+                    break;
+                }
+            }
+            if (!exactObjectExistsOutsideMain)
+                return false;
+
+            try
+            {
+                main.Roster.AddToCounts(main.Element, -1);
+                removedName = DescribeItem(main.Item, main.Modifier);
+                ModLog.AlwaysInfo("Removed erroneous prior recovery duplicate '" +
+                    removedName + "' from the active main inventory. The original " +
+                    "runtime item at " + FirstExternalLocation(occurrences,
+                        main.Item) + " was left untouched.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Could not remove prior recovery duplicate for " +
+                    careerId + ": " + ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private static string FirstExternalLocation(
+            List<RelicOccurrence> occurrences, ItemObject item)
+        {
+            for (int i = 0; i < occurrences.Count; i++)
+            {
+                if (!occurrences[i].IsMainRoster &&
+                    Object.ReferenceEquals(occurrences[i].Item, item))
+                    return occurrences[i].Location;
+            }
+            return "another character or storage owner";
+        }
+
+        private static bool TryRestoreMissingRelic(string careerId,
+            out string restoredName, out string source, out string error)
+        {
+            restoredName = CareerUniqueRuntime.GetItemName(careerId);
+            source = null;
+            error = null;
+
+            ItemObject saved = FindSavedRelicItem(careerId);
+            if (saved != null)
+            {
+                ItemModifier modifier =
+                    CareerUniqueRuntime.RollLootModifier(saved) as ItemModifier;
                 bool added;
                 _restoring = true;
                 try
                 {
                     added = CareerUniqueRuntime.AddToRoster(
-                        MobileParty.MainParty.ItemRoster, item, modifier, 1,
+                        MobileParty.MainParty.ItemRoster, saved, modifier, 1,
                         out error);
                 }
                 finally
                 {
                     _restoring = false;
                 }
-
-                if (added)
+                if (!added)
+                    return false;
+                restoredName = DescribeItem(saved, modifier);
+                source = "restored from TOR's saved relic record";
+            }
+            else
+            {
+                bool granted;
+                _restoring = true;
+                try
                 {
-                    string name = CareerUniqueRuntime.FormatModifiedItemName(
-                        item.Name == null ? item.StringId :
-                            item.Name.ToString(), modifier);
-                    repaired.Add(name +
-                        (reclaimed ? " (reclaimed from " + source + ")" :
-                            " (restored from TOR's saved relic record)"));
-                    ModLog.AlwaysInfo("Recovered missing real relic '" +
-                        name + "' for " + pair.Key +
-                        (reclaimed ? " from " + source :
-                            " from TOR's crafted-item save record") + ".");
+                    granted =
+                        CareerUniqueRuntime.TryGrantCareerItemWithLootModifier(
+                            careerId, out restoredName, out error);
                 }
-                else
+                finally
                 {
-                    if (reclaimed)
-                        sourceRoster.AddToCounts(sourceElement, 1);
-                    failed.Add(pair.Key + ": " +
-                        (error ?? "inventory insertion failed"));
+                    _restoring = false;
                 }
+                if (!granted)
+                    return false;
+                source = "recreated because the old runtime record was missing";
             }
 
-            SetItemRuntime.Tick();
-            string result = repaired.Count == 0 ?
-                "No orphaned relic reward could be restored." :
-                "Restored missing recovered relic reward(s): " +
-                String.Join(", ", repaired.ToArray()) + ".";
-            if (failed.Count > 0)
-                result += " Failed: " +
-                    String.Join("; ", failed.ToArray()) + ".";
-            ModLog.AlwaysInfo(result);
-            return result;
+            List<RelicOccurrence> verification;
+            string scanError;
+            if (!TryScanRelicOccurrences(careerId, out verification,
+                out scanError))
+            {
+                error = "post-restore ownership verification failed: " + scanError;
+                return false;
+            }
+            for (int i = 0; i < verification.Count; i++)
+            {
+                if (verification[i].IsMainRoster)
+                    return true;
+            }
+            error = "the restored relic was not retained in the active main inventory";
+            return false;
         }
 
-        private static bool TryFindOrphanedRelics(
-            out Dictionary<string, ItemObject> orphanByCareer,
-            out string error)
+        private static ItemObject FindSavedRelicItem(string careerId)
         {
-            orphanByCareer =
-                new Dictionary<string, ItemObject>(
-                    StringComparer.OrdinalIgnoreCase);
-            error = null;
-
             object artisan = CareerUniqueRuntime.GetArtisanBehavior();
             IDictionary crafted = artisan == null ? null :
                 AccessTools.Field(artisan.GetType(), "_customCraftedItems")
                     ?.GetValue(artisan) as IDictionary;
             if (crafted == null)
-            {
-                error = "TOR's crafted-item save dictionary is unavailable.";
-                return false;
-            }
+                return null;
 
             foreach (DictionaryEntry entry in crafted)
             {
                 ItemObject item = entry.Key as ItemObject;
-                if (item == null)
-                    continue;
+                string foundCareer;
+                if (item != null &&
+                    TryGetRealRelicCareer(item, entry.Value, out foundCareer) &&
+                    String.Equals(foundCareer, careerId,
+                        StringComparison.OrdinalIgnoreCase))
+                    return item;
+            }
+            return null;
+        }
 
-                string careerId;
-                if (!TryGetRealRelicCareer(item, entry.Value, out careerId) ||
-                    !AdminBridge.HasDiscoveredSetPiece(careerId, 0) ||
-                    orphanByCareer.ContainsKey(careerId))
-                    continue;
+        private static bool TryScanRelicOccurrences(string careerId,
+            out List<RelicOccurrence> occurrences, out string error)
+        {
+            occurrences = new List<RelicOccurrence>();
+            error = null;
+            if (String.IsNullOrEmpty(careerId))
+            {
+                error = "career id is empty";
+                return false;
+            }
 
-                OwnershipState ownership = GetOwnershipState(item);
-                if (ownership == OwnershipState.Unknown)
+            try
+            {
+                HashSet<ItemRoster> visitedRosters = new HashSet<ItemRoster>();
+                ItemRoster mainRoster = MobileParty.MainParty == null ? null :
+                    MobileParty.MainParty.ItemRoster;
+                AddRosterOccurrences(mainRoster, "active main inventory",
+                    true, careerId, occurrences, visitedRosters);
+
+                foreach (MobileParty party in MobileParty.All)
                 {
-                    ModLog.Error("Skipped orphaned-relic repair candidate '" +
-                        (item.Name == null ? item.StringId :
-                            item.Name.ToString()) +
-                        "' because player ownership could not be determined " +
-                        "without risking a duplicate.");
-                    continue;
+                    if (party == null || party.ItemRoster == null)
+                        continue;
+                    string partyName = party.Name == null ? party.StringId :
+                        party.Name.ToString();
+                    AddRosterOccurrences(party.ItemRoster,
+                        "party " + partyName + " (" +
+                        (party.StringId ?? "<no-id>") + ")",
+                        Object.ReferenceEquals(party.ItemRoster, mainRoster),
+                        careerId, occurrences, visitedRosters);
                 }
-                if (ownership == OwnershipState.NotOwned)
-                    orphanByCareer.Add(careerId, item);
+
+                foreach (Settlement settlement in Settlement.All)
+                {
+                    if (settlement == null)
+                        continue;
+                    string settlementName = settlement.Name == null ?
+                        settlement.StringId : settlement.Name.ToString();
+                    AddRosterOccurrences(settlement.ItemRoster,
+                        "settlement inventory at " + settlementName,
+                        false, careerId, occurrences, visitedRosters);
+                    AddRosterOccurrences(settlement.Stash,
+                        "stash at " + settlementName,
+                        false, careerId, occurrences, visitedRosters);
+                    AddRosterOccurrences(settlement.Party == null ? null :
+                        settlement.Party.ItemRoster,
+                        "settlement party inventory at " + settlementName,
+                        false, careerId, occurrences, visitedRosters);
+                }
+
+                IEnumerable heroes;
+                if (!TryGetAllAliveHeroes(out heroes))
+                {
+                    error = "Bannerlord's complete living-hero registry could not " +
+                        "be read; repair was aborted to avoid duplicating a relic on " +
+                        "another playable character.";
+                    return false;
+                }
+
+                HashSet<Hero> visitedHeroes = new HashSet<Hero>();
+                if (Hero.MainHero != null)
+                    visitedHeroes.Add(Hero.MainHero);
+                foreach (object value in heroes)
+                {
+                    Hero hero = value as Hero;
+                    if (hero != null)
+                        visitedHeroes.Add(hero);
+                }
+                foreach (Hero hero in visitedHeroes)
+                {
+                    string heroName = hero.Name == null ? hero.StringId :
+                        hero.Name.ToString();
+                    if (!AddEquipmentOccurrences(hero.BattleEquipment,
+                        heroName + " battle equipment", careerId, occurrences) ||
+                        !AddEquipmentOccurrences(hero.CivilianEquipment,
+                        heroName + " civilian equipment", careerId, occurrences))
+                    {
+                        error = "equipment for " + heroName +
+                            " could not be scanned; repair was aborted to avoid a " +
+                            "duplicate.";
+                        return false;
+                    }
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ": " + ex.Message;
+                ModLog.Error("World-wide relic ownership scan failed for " +
+                    careerId + ": " + error);
+                return false;
+            }
+        }
+
+        private static void AddRosterOccurrences(ItemRoster roster,
+            string location, bool isMainRoster, string careerId,
+            List<RelicOccurrence> occurrences,
+            HashSet<ItemRoster> visitedRosters)
+        {
+            if (roster == null || !visitedRosters.Add(roster))
+                return;
+            foreach (ItemRosterElement rosterElement in roster)
+            {
+                if (rosterElement.Amount <= 0)
+                    continue;
+                EquipmentElement element = rosterElement.EquipmentElement;
+                ItemObject item = element.Item;
+                string foundCareer;
+                if (item == null ||
+                    !TryGetRelicCareerFromAnyItem(item, out foundCareer) ||
+                    !String.Equals(foundCareer, careerId,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                occurrences.Add(new RelicOccurrence
+                {
+                    Item = item,
+                    Modifier = element.ItemModifier,
+                    Roster = roster,
+                    Element = element,
+                    Amount = rosterElement.Amount,
+                    Location = location,
+                    IsMainRoster = isMainRoster,
+                    IsEquipment = false
+                });
+            }
+        }
+
+        private static bool AddEquipmentOccurrences(object equipment,
+            string location, string careerId,
+            List<RelicOccurrence> occurrences)
+        {
+            if (equipment == null)
+                return true;
+            IEnumerable elements;
+            if (!TryEnumerateEquipmentElements(equipment, out elements))
+                return false;
+            foreach (object value in elements)
+            {
+                ItemObject item = GetProperty(value, "Item") as ItemObject;
+                string foundCareer;
+                if (item == null ||
+                    !TryGetRelicCareerFromAnyItem(item, out foundCareer) ||
+                    !String.Equals(foundCareer, careerId,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                occurrences.Add(new RelicOccurrence
+                {
+                    Item = item,
+                    Modifier = GetProperty(value, "ItemModifier") as ItemModifier,
+                    Roster = null,
+                    Element = default(EquipmentElement),
+                    Amount = 1,
+                    Location = location,
+                    IsMainRoster = false,
+                    IsEquipment = true
+                });
             }
             return true;
+        }
+
+        private static bool TryGetRelicCareerFromAnyItem(ItemObject item,
+            out string careerId)
+        {
+            careerId = null;
+            if (item == null)
+                return false;
+            string itemName = item.Name == null ? String.Empty :
+                item.Name.ToString();
+            if (itemName.StartsWith("[ADMIN COPY]",
+                StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            try
+            {
+                MethodInfo getTraits = AccessTools.Method(
+                    typeof(SetItemRuntime), "GetItemTraits",
+                    new[] { typeof(string) });
+                IList traits = getTraits == null ? null :
+                    getTraits.Invoke(null, new object[] { item.StringId }) as IList;
+                if (traits == null)
+                    return TryGetRealRelicCareer(item, out careerId);
+                if (ContainsPrefix(traits, "torcu_admin_") ||
+                    ContainsPrefix(traits, "torcu_hero_"))
+                    return false;
+
+                MethodInfo findSignature = AccessTools.Method(
+                    typeof(SetItemRuntime), "FindPieceSignature",
+                    new[] { typeof(IList) });
+                object signature = findSignature == null ? null :
+                    findSignature.Invoke(null, new object[] { traits });
+                if (signature == null)
+                    return false;
+                object rawIndex = GetField(signature, "PieceIndex") ??
+                    GetProperty(signature, "PieceIndex");
+                if (rawIndex == null || Convert.ToInt32(rawIndex) != 0)
+                    return false;
+                object definition = GetField(signature, "Definition") ??
+                    GetProperty(signature, "Definition");
+                if (definition == null)
+                    return false;
+                careerId = Convert.ToString(
+                    GetField(definition, "CareerId") ??
+                    GetProperty(definition, "CareerId"));
+                return !String.IsNullOrEmpty(careerId);
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Could not inspect relic signature for '" +
+                    (String.IsNullOrEmpty(itemName) ? item.StringId : itemName) +
+                    "': " + ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
         }
 
         private static bool TryGetRealRelicCareer(ItemObject item,
@@ -742,8 +1004,7 @@ namespace TORCareerUniques
                     ?.GetValue(artisan) as IDictionary;
             if (crafted == null || item == null || !crafted.Contains(item))
                 return false;
-            return TryGetRealRelicCareer(item, crafted[item],
-                out careerId);
+            return TryGetRealRelicCareer(item, crafted[item], out careerId);
         }
 
         private static bool TryGetRealRelicCareer(ItemObject item,
@@ -766,21 +1027,16 @@ namespace TORCareerUniques
                 new[] { typeof(IList) });
             if (findSignature == null)
                 return false;
-
             try
             {
                 object signature = findSignature.Invoke(null,
                     new object[] { traits });
                 if (signature == null)
                     return false;
-
-                object rawPieceIndex =
-                    GetField(signature, "PieceIndex") ??
+                object rawIndex = GetField(signature, "PieceIndex") ??
                     GetProperty(signature, "PieceIndex");
-                if (rawPieceIndex == null ||
-                    Convert.ToInt32(rawPieceIndex) != 0)
+                if (rawIndex == null || Convert.ToInt32(rawIndex) != 0)
                     return false;
-
                 object definition = GetField(signature, "Definition") ??
                     GetProperty(signature, "Definition");
                 if (definition == null)
@@ -792,230 +1048,223 @@ namespace TORCareerUniques
             }
             catch (Exception ex)
             {
-                ModLog.Error("Skipped malformed crafted-item signature for '" +
-                    (String.IsNullOrEmpty(itemName) ? item.StringId :
-                        itemName) + "': " + ex.GetType().Name + ": " +
-                    ex.Message);
+                ModLog.Error("Skipped malformed saved relic signature for '" +
+                    (String.IsNullOrEmpty(itemName) ? item.StringId : itemName) +
+                    "': " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
         }
 
-        private static OwnershipState GetOwnershipState(ItemObject item)
+        private static bool TryGetAllAliveHeroes(out IEnumerable heroes)
         {
-            if (item == null)
-                return OwnershipState.Unknown;
-
+            heroes = null;
             try
             {
-                if (RosterContains(MobileParty.MainParty == null ? null :
-                    MobileParty.MainParty.ItemRoster, item))
-                    return OwnershipState.Owned;
-
-                Clan clan = Clan.PlayerClan;
-                if (clan == null)
-                    return OwnershipState.Unknown;
-
-                foreach (MobileParty party in MobileParty.All)
-                {
-                    if (party == null || party.ItemRoster == null)
-                        continue;
-                    bool playerClanParty =
-                        Object.ReferenceEquals(party.ActualClan, clan) ||
-                        (party.LeaderHero != null &&
-                         Object.ReferenceEquals(party.LeaderHero.Clan, clan));
-                    if (playerClanParty &&
-                        RosterContains(party.ItemRoster, item))
-                        return OwnershipState.Owned;
-                }
-
-                bool unresolvedEquipment = false;
-                HashSet<Hero> heroes = new HashSet<Hero>();
-                if (Hero.MainHero != null)
-                    heroes.Add(Hero.MainHero);
-                AddHeroes(heroes, clan, "Heroes");
-                AddHeroes(heroes, clan, "Companions");
-                AddHeroes(heroes, clan, "Lords");
-                foreach (Hero hero in heroes)
-                {
-                    bool contains;
-                    if (!TryEquipmentContains(hero == null ? null :
-                        hero.BattleEquipment, item, out contains))
-                        unresolvedEquipment = true;
-                    else if (contains)
-                        return OwnershipState.Owned;
-
-                    if (!TryEquipmentContains(hero == null ? null :
-                        hero.CivilianEquipment, item, out contains))
-                        unresolvedEquipment = true;
-                    else if (contains)
-                        return OwnershipState.Owned;
-                }
-
-                foreach (Settlement settlement in Settlement.All)
-                {
-                    if (settlement == null ||
-                        settlement.OwnerClan != clan)
-                        continue;
-                    if (RosterContains(settlement.ItemRoster, item) ||
-                        RosterContains(settlement.Stash, item) ||
-                        (settlement.Party != null &&
-                         RosterContains(settlement.Party.ItemRoster, item)))
-                        return OwnershipState.Owned;
-                }
-
-                return unresolvedEquipment ? OwnershipState.Unknown :
-                    OwnershipState.NotOwned;
+                PropertyInfo property = typeof(Hero).GetProperty(
+                    "AllAliveHeroes", BindingFlags.Public |
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (property == null)
+                    return false;
+                heroes = property.GetValue(null, null) as IEnumerable;
+                return heroes != null;
             }
             catch (Exception ex)
             {
-                ModLog.Error("Player relic ownership scan failed for '" +
-                    (item.Name == null ? item.StringId :
-                        item.Name.ToString()) + "': " +
+                ModLog.Error("Living-hero registry scan failed: " +
                     ex.GetType().Name + ": " + ex.Message);
-                return OwnershipState.Unknown;
-            }
-        }
-
-        private static bool TryDetachAnyStackFromExternalParty(
-            ItemObject item, out ItemModifier modifier,
-            out ItemRoster sourceRoster,
-            out EquipmentElement sourceElement, out string sourceName)
-        {
-            modifier = null;
-            sourceRoster = null;
-            sourceElement = default(EquipmentElement);
-            sourceName = null;
-            if (item == null)
                 return false;
-
-            Clan playerClan = Clan.PlayerClan;
-            foreach (MobileParty party in MobileParty.All)
-            {
-                if (party == null || !party.IsActive ||
-                    Object.ReferenceEquals(party, MobileParty.MainParty) ||
-                    party.ItemRoster == null)
-                    continue;
-                bool playerOwned =
-                    playerClan != null &&
-                    (Object.ReferenceEquals(party.ActualClan, playerClan) ||
-                     (party.LeaderHero != null &&
-                      Object.ReferenceEquals(party.LeaderHero.Clan,
-                          playerClan)));
-                if (playerOwned)
-                    continue;
-
-                EquipmentElement found;
-                if (!TryFindAnyStack(party.ItemRoster, item, out found))
-                    continue;
-
-                party.ItemRoster.AddToCounts(found, -1);
-                modifier = found.ItemModifier;
-                sourceRoster = party.ItemRoster;
-                sourceElement = found;
-                sourceName = (party.Name == null ? party.StringId :
-                    party.Name.ToString()) + " (" +
-                    (party.StringId ?? "<no-id>") + ")";
-                return true;
-            }
-            return false;
-        }
-
-        private static bool TryFindAnyStack(ItemRoster roster,
-            ItemObject item, out EquipmentElement found)
-        {
-            found = default(EquipmentElement);
-            if (roster == null || item == null)
-                return false;
-            foreach (ItemRosterElement element in roster)
-            {
-                if (element.Amount > 0 &&
-                    Object.ReferenceEquals(
-                        element.EquipmentElement.Item, item))
-                {
-                    found = element.EquipmentElement;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static void AddHeroes(HashSet<Hero> target, object owner,
-            string propertyName)
-        {
-            IEnumerable values = GetProperty(owner, propertyName) as
-                IEnumerable;
-            if (values == null)
-                return;
-            foreach (object value in values)
-            {
-                Hero hero = value as Hero;
-                if (hero != null)
-                    target.Add(hero);
             }
         }
 
-        private static bool RosterContains(ItemRoster roster,
-            ItemObject item)
+        private static bool TryEnumerateEquipmentElements(object equipment,
+            out IEnumerable elements)
         {
-            if (roster == null || item == null)
-                return false;
-            foreach (ItemRosterElement element in roster)
-            {
-                if (element.Amount > 0 &&
-                    Object.ReferenceEquals(
-                        element.EquipmentElement.Item, item))
-                    return true;
-            }
-            return false;
-        }
-
-        private static bool TryEquipmentContains(object equipment,
-            ItemObject item, out bool contains)
-        {
-            contains = false;
-            if (item == null)
-                return false;
-            if (equipment == null)
-                return true;
-
+            elements = null;
             try
             {
                 MethodInfo enumerate = AccessTools.Method(
                     typeof(SetItemRuntime), "EnumerateEquipmentElements",
                     new[] { typeof(object) });
                 if (enumerate == null)
-                {
-                    ModLog.Error("Could not resolve TORCU equipment " +
-                        "enumeration during relic ownership scan.");
                     return false;
+                elements = enumerate.Invoke(null,
+                    new object[] { equipment }) as IEnumerable;
+                return elements != null;
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Equipment enumeration failed during relic scan: " +
+                    ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TryCountExactStackGlobally(ItemObject item,
+            ItemModifier modifier, out int count, out string locations,
+            out string error)
+        {
+            count = 0;
+            locations = null;
+            error = null;
+            if (item == null)
+            {
+                error = "item is null";
+                return false;
+            }
+
+            try
+            {
+                List<string> foundAt = new List<string>();
+                HashSet<string> uniqueLocations = new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+                HashSet<ItemRoster> visitedRosters = new HashSet<ItemRoster>();
+                ItemRoster mainRoster = MobileParty.MainParty == null ? null :
+                    MobileParty.MainParty.ItemRoster;
+                CountExactInRoster(mainRoster, "active main inventory", item,
+                    modifier, ref count, foundAt, uniqueLocations,
+                    visitedRosters);
+
+                foreach (MobileParty party in MobileParty.All)
+                {
+                    if (party == null || party.ItemRoster == null)
+                        continue;
+                    string partyName = party.Name == null ? party.StringId :
+                        party.Name.ToString();
+                    CountExactInRoster(party.ItemRoster,
+                        "party " + partyName + " (" +
+                        (party.StringId ?? "<no-id>") + ")", item, modifier,
+                        ref count, foundAt, uniqueLocations, visitedRosters);
                 }
 
-                IEnumerable elements = enumerate.Invoke(null,
-                    new[] { equipment }) as IEnumerable;
-                if (elements == null)
+                foreach (Settlement settlement in Settlement.All)
                 {
-                    ModLog.Error("TORCU equipment enumeration returned null " +
-                        "during relic ownership scan.");
-                    return false;
+                    if (settlement == null)
+                        continue;
+                    string settlementName = settlement.Name == null ?
+                        settlement.StringId : settlement.Name.ToString();
+                    CountExactInRoster(settlement.ItemRoster,
+                        "settlement inventory at " + settlementName, item,
+                        modifier, ref count, foundAt, uniqueLocations,
+                        visitedRosters);
+                    CountExactInRoster(settlement.Stash,
+                        "stash at " + settlementName, item, modifier,
+                        ref count, foundAt, uniqueLocations, visitedRosters);
+                    CountExactInRoster(settlement.Party == null ? null :
+                        settlement.Party.ItemRoster,
+                        "settlement party inventory at " + settlementName,
+                        item, modifier, ref count, foundAt, uniqueLocations,
+                        visitedRosters);
                 }
 
-                foreach (object element in elements)
+                IEnumerable heroes;
+                if (!TryGetAllAliveHeroes(out heroes))
                 {
-                    if (Object.ReferenceEquals(
-                        GetProperty(element, "Item"), item))
+                    error = "the complete living-hero registry was unavailable";
+                    return false;
+                }
+                HashSet<Hero> visitedHeroes = new HashSet<Hero>();
+                if (Hero.MainHero != null)
+                    visitedHeroes.Add(Hero.MainHero);
+                foreach (object value in heroes)
+                {
+                    Hero hero = value as Hero;
+                    if (hero != null)
+                        visitedHeroes.Add(hero);
+                }
+                foreach (Hero hero in visitedHeroes)
+                {
+                    string heroName = hero.Name == null ? hero.StringId :
+                        hero.Name.ToString();
+                    if (!CountExactInEquipment(hero.BattleEquipment,
+                        heroName + " battle equipment", item, modifier,
+                        ref count, foundAt, uniqueLocations) ||
+                        !CountExactInEquipment(hero.CivilianEquipment,
+                            heroName + " civilian equipment", item, modifier,
+                            ref count, foundAt, uniqueLocations))
                     {
-                        contains = true;
-                        return true;
+                        error = "equipment for " + heroName +
+                            " could not be scanned";
+                        return false;
                     }
                 }
+
+                locations = String.Join(", ", foundAt.ToArray());
                 return true;
             }
             catch (Exception ex)
             {
-                ModLog.Error("Equipment ownership scan failed: " +
-                    ex.GetType().Name + ": " + ex.Message);
+                error = ex.GetType().Name + ": " + ex.Message;
+                ModLog.Error("Exact global relic stack scan failed: " + error);
                 return false;
             }
+        }
+
+        private static void CountExactInRoster(ItemRoster roster,
+            string location, ItemObject item, ItemModifier modifier,
+            ref int count, List<string> locations,
+            HashSet<string> uniqueLocations,
+            HashSet<ItemRoster> visitedRosters)
+        {
+            if (roster == null || !visitedRosters.Add(roster))
+                return;
+            int local = 0;
+            foreach (ItemRosterElement element in roster)
+            {
+                EquipmentElement equipment = element.EquipmentElement;
+                if (element.Amount > 0 &&
+                    Object.ReferenceEquals(equipment.Item, item) &&
+                    Object.ReferenceEquals(equipment.ItemModifier, modifier))
+                    local += element.Amount;
+            }
+            if (local <= 0)
+                return;
+            count += local;
+            if (uniqueLocations.Add(location))
+                locations.Add(location);
+        }
+
+        private static bool CountExactInEquipment(object equipment,
+            string location, ItemObject item, ItemModifier modifier,
+            ref int count, List<string> locations,
+            HashSet<string> uniqueLocations)
+        {
+            if (equipment == null)
+                return true;
+            IEnumerable elements;
+            if (!TryEnumerateEquipmentElements(equipment, out elements))
+                return false;
+            int local = 0;
+            foreach (object element in elements)
+            {
+                if (Object.ReferenceEquals(GetProperty(element, "Item"), item) &&
+                    Object.ReferenceEquals(
+                        GetProperty(element, "ItemModifier"), modifier))
+                    local++;
+            }
+            if (local > 0)
+            {
+                count += local;
+                if (uniqueLocations.Add(location))
+                    locations.Add(location);
+            }
+            return true;
+        }
+
+        private static string FormatOccurrenceLocations(
+            List<RelicOccurrence> occurrences)
+        {
+            HashSet<string> unique = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            List<string> locations = new List<string>();
+            for (int i = 0; i < occurrences.Count; i++)
+            {
+                string location = occurrences[i].Location ?? "unknown location";
+                if (unique.Add(location))
+                    locations.Add(location);
+                if (locations.Count >= 6)
+                    break;
+            }
+            return String.Join(", ", locations.ToArray());
         }
 
         private static string DescribeItem(ItemObject item,
