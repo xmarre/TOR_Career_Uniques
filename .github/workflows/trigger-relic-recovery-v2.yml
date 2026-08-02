@@ -1,0 +1,41 @@
+name: Trigger relic recovery correction
+
+on:
+  push:
+    branches:
+      - fix/relic-reward-inventory-integrity
+    paths:
+      - .github/workflows/trigger-relic-recovery-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: fix/relic-reward-inventory-integrity
+          fetch-depth: 0
+      - name: Execute bounded correction
+        shell: python
+        run: |
+          from pathlib import Path
+          workflow = Path('.github/workflows/apply-relic-recovery-v2.yml')
+          text = workflow.read_text(encoding='utf-8')
+          start_marker = '      - name: Apply bounded source corrections\n        shell: python\n        run: |\n'
+          end_marker = '\n      - name: Commit corrected implementation\n'
+          start = text.index(start_marker) + len(start_marker)
+          end = text.index(end_marker, start)
+          lines = text[start:end].splitlines()
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          exec(compile(code, str(workflow), 'exec'), {'__name__': '__main__'})
+      - name: Commit corrected implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Correct multi-character relic recovery and MCM placement"
+          git push origin HEAD:fix/relic-reward-inventory-integrity
