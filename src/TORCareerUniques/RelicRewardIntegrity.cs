@@ -635,7 +635,7 @@ namespace TORCareerUniques
                     out modifier, out sourceRoster, out sourceElement,
                     out source);
                 if (!reclaimed)
-                    modifier = CareerUniqueRuntime.RollLootModifier(item);
+                    modifier = CareerUniqueRuntime.RollLootModifier(item) as ItemModifier;
 
                 string error;
                 bool added;
