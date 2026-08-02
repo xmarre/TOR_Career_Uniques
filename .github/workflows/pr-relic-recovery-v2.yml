@@ -29,11 +29,19 @@ jobs:
           end = text.index(end_marker, start)
           lines = text[start:end].splitlines()
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+
           old = "assert relic.count(audit_class) == 1\nrelic = relic.replace(audit_class, occurrence_class)"
           new = "relic, count = re.subn(r'        private sealed class PendingGrantAudit\\n        \\{.*?        \\}\\n', occurrence_class, relic, count=1, flags=re.S)\nassert count == 1, 'pending audit class was not replaced exactly once'"
           if old not in code:
               raise RuntimeError('Expected pending-audit replacement block is absent.')
           code = code.replace(old, new)
+
+          old = "assert relic.count(old_tick) == 1\nrelic = relic.replace(old_tick, new_tick)"
+          new = "relic, count = re.subn(r'                if \\(restored\\)\\n                \\{.*?                \\}\\n                else if \\(audit\\.Attempts >= 3\\)', new_tick + '                else if (audit.Attempts >= 3)', relic, count=1, flags=re.S)\nassert count == 1, 'restored audit branch was not replaced exactly once'"
+          if old not in code:
+              raise RuntimeError('Expected audit-log replacement block is absent.')
+          code = code.replace(old, new)
+
           exec(compile(code, str(workflow), 'exec'), {'__name__': '__main__'})
           for path in Path('.patch').glob('*') if Path('.patch').exists() else []:
               path.unlink()
