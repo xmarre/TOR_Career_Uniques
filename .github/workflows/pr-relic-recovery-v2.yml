@@ -1,5 +1,6 @@
 name: Apply multi-character relic recovery correction
 
+# Trigger revision 7
 on:
   pull_request:
     branches:
