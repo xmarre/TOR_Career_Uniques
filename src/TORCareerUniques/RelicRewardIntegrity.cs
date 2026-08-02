@@ -90,6 +90,13 @@ namespace TORCareerUniques
         private static bool _screenDeferralLogged;
         private static object _campaignSession;
 
+        private enum OwnershipState
+        {
+            Unknown,
+            NotOwned,
+            Owned
+        }
+
         private sealed class InsertState
         {
             internal bool Verifiable;
@@ -709,7 +716,17 @@ namespace TORCareerUniques
                     orphanByCareer.ContainsKey(careerId))
                     continue;
 
-                if (!IsOwnedByPlayer(item))
+                OwnershipState ownership = GetOwnershipState(item);
+                if (ownership == OwnershipState.Unknown)
+                {
+                    ModLog.Error("Skipped orphaned-relic repair candidate '" +
+                        (item.Name == null ? item.StringId :
+                            item.Name.ToString()) +
+                        "' because player ownership could not be determined " +
+                        "without risking a duplicate.");
+                    continue;
+                }
+                if (ownership == OwnershipState.NotOwned)
                     orphanByCareer.Add(careerId, item);
             }
             return true;
@@ -735,9 +752,13 @@ namespace TORCareerUniques
             careerId = null;
             IList traits = GetProperty(saveData, "ItemTraits") as IList ??
                 GetField(saveData, "ItemTraits") as IList;
+            string itemName = item == null || item.Name == null ?
+                String.Empty : item.Name.ToString();
             if (item == null || traits == null ||
                 ContainsPrefix(traits, "torcu_admin_") ||
-                ContainsPrefix(traits, "torcu_hero_"))
+                ContainsPrefix(traits, "torcu_hero_") ||
+                itemName.StartsWith("[ADMIN COPY]",
+                    StringComparison.OrdinalIgnoreCase))
                 return false;
 
             MethodInfo findSignature = AccessTools.Method(
@@ -746,36 +767,54 @@ namespace TORCareerUniques
             if (findSignature == null)
                 return false;
 
-            object signature = findSignature.Invoke(null,
-                new object[] { traits });
-            if (signature == null)
-                return false;
+            try
+            {
+                object signature = findSignature.Invoke(null,
+                    new object[] { traits });
+                if (signature == null)
+                    return false;
 
-            int pieceIndex = Convert.ToInt32(
-                GetField(signature, "PieceIndex") ??
-                GetProperty(signature, "PieceIndex"));
-            if (pieceIndex != 0)
-                return false;
+                object rawPieceIndex =
+                    GetField(signature, "PieceIndex") ??
+                    GetProperty(signature, "PieceIndex");
+                if (rawPieceIndex == null ||
+                    Convert.ToInt32(rawPieceIndex) != 0)
+                    return false;
 
-            object definition = GetField(signature, "Definition") ??
-                GetProperty(signature, "Definition");
-            careerId = Convert.ToString(
-                GetField(definition, "CareerId") ??
-                GetProperty(definition, "CareerId"));
-            return !String.IsNullOrEmpty(careerId);
+                object definition = GetField(signature, "Definition") ??
+                    GetProperty(signature, "Definition");
+                if (definition == null)
+                    return false;
+                careerId = Convert.ToString(
+                    GetField(definition, "CareerId") ??
+                    GetProperty(definition, "CareerId"));
+                return !String.IsNullOrEmpty(careerId);
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Skipped malformed crafted-item signature for '" +
+                    (String.IsNullOrEmpty(itemName) ? item.StringId :
+                        itemName) + "': " + ex.GetType().Name + ": " +
+                    ex.Message);
+                return false;
+            }
         }
 
-        private static bool IsOwnedByPlayer(ItemObject item)
+        private static OwnershipState GetOwnershipState(ItemObject item)
         {
             if (item == null)
-                return false;
-            if (RosterContains(MobileParty.MainParty == null ? null :
-                MobileParty.MainParty.ItemRoster, item))
-                return true;
+                return OwnershipState.Unknown;
 
-            Clan clan = Clan.PlayerClan;
-            if (clan != null)
+            try
             {
+                if (RosterContains(MobileParty.MainParty == null ? null :
+                    MobileParty.MainParty.ItemRoster, item))
+                    return OwnershipState.Owned;
+
+                Clan clan = Clan.PlayerClan;
+                if (clan == null)
+                    return OwnershipState.Unknown;
+
                 foreach (MobileParty party in MobileParty.All)
                 {
                     if (party == null || party.ItemRoster == null)
@@ -786,36 +825,55 @@ namespace TORCareerUniques
                          Object.ReferenceEquals(party.LeaderHero.Clan, clan));
                     if (playerClanParty &&
                         RosterContains(party.ItemRoster, item))
-                        return true;
+                        return OwnershipState.Owned;
                 }
-            }
 
-            HashSet<Hero> heroes = new HashSet<Hero>();
-            if (Hero.MainHero != null)
-                heroes.Add(Hero.MainHero);
-            AddHeroes(heroes, clan, "Heroes");
-            AddHeroes(heroes, clan, "Companions");
-            AddHeroes(heroes, clan, "Lords");
-            foreach (Hero hero in heroes)
-            {
-                if (EquipmentContains(hero == null ? null :
-                    hero.BattleEquipment, item) ||
-                    EquipmentContains(hero == null ? null :
-                        hero.CivilianEquipment, item))
-                    return true;
-            }
+                bool unresolvedEquipment = false;
+                HashSet<Hero> heroes = new HashSet<Hero>();
+                if (Hero.MainHero != null)
+                    heroes.Add(Hero.MainHero);
+                AddHeroes(heroes, clan, "Heroes");
+                AddHeroes(heroes, clan, "Companions");
+                AddHeroes(heroes, clan, "Lords");
+                foreach (Hero hero in heroes)
+                {
+                    bool contains;
+                    if (!TryEquipmentContains(hero == null ? null :
+                        hero.BattleEquipment, item, out contains))
+                        unresolvedEquipment = true;
+                    else if (contains)
+                        return OwnershipState.Owned;
 
-            if (clan != null)
-            {
+                    if (!TryEquipmentContains(hero == null ? null :
+                        hero.CivilianEquipment, item, out contains))
+                        unresolvedEquipment = true;
+                    else if (contains)
+                        return OwnershipState.Owned;
+                }
+
                 foreach (Settlement settlement in Settlement.All)
                 {
-                    if (settlement != null &&
-                        settlement.OwnerClan == clan &&
-                        RosterContains(settlement.ItemRoster, item))
-                        return true;
+                    if (settlement == null ||
+                        settlement.OwnerClan != clan)
+                        continue;
+                    if (RosterContains(settlement.ItemRoster, item) ||
+                        RosterContains(settlement.Stash, item) ||
+                        (settlement.Party != null &&
+                         RosterContains(settlement.Party.ItemRoster, item)))
+                        return OwnershipState.Owned;
                 }
+
+                return unresolvedEquipment ? OwnershipState.Unknown :
+                    OwnershipState.NotOwned;
             }
-            return false;
+            catch (Exception ex)
+            {
+                ModLog.Error("Player relic ownership scan failed for '" +
+                    (item.Name == null ? item.StringId :
+                        item.Name.ToString()) + "': " +
+                    ex.GetType().Name + ": " + ex.Message);
+                return OwnershipState.Unknown;
+            }
         }
 
         private static bool TryDetachAnyStackFromExternalParty(
@@ -911,32 +969,53 @@ namespace TORCareerUniques
             return false;
         }
 
-        private static bool EquipmentContains(object equipment,
-            ItemObject item)
+        private static bool TryEquipmentContains(object equipment,
+            ItemObject item, out bool contains)
         {
-            if (equipment == null || item == null)
+            contains = false;
+            if (item == null)
                 return false;
+            if (equipment == null)
+                return true;
+
             try
             {
                 MethodInfo enumerate = AccessTools.Method(
                     typeof(SetItemRuntime), "EnumerateEquipmentElements",
                     new[] { typeof(object) });
-                IEnumerable elements = enumerate == null ? null :
-                    enumerate.Invoke(null, new[] { equipment }) as
-                        IEnumerable;
-                if (elements == null)
+                if (enumerate == null)
+                {
+                    ModLog.Error("Could not resolve TORCU equipment " +
+                        "enumeration during relic ownership scan.");
                     return false;
+                }
+
+                IEnumerable elements = enumerate.Invoke(null,
+                    new[] { equipment }) as IEnumerable;
+                if (elements == null)
+                {
+                    ModLog.Error("TORCU equipment enumeration returned null " +
+                        "during relic ownership scan.");
+                    return false;
+                }
+
                 foreach (object element in elements)
                 {
                     if (Object.ReferenceEquals(
                         GetProperty(element, "Item"), item))
+                    {
+                        contains = true;
                         return true;
+                    }
                 }
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
+                ModLog.Error("Equipment ownership scan failed: " +
+                    ex.GetType().Name + ": " + ex.Message);
+                return false;
             }
-            return false;
         }
 
         private static string DescribeItem(ItemObject item,
