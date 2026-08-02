@@ -1,11 +1,9 @@
-name: Apply relic recovery correction
+name: Diagnose relic recovery chunks
 
 on:
   push:
     branches:
       - fix/relic-reward-inventory-integrity
-    paths:
-      - .github/workflows/apply-relic-recovery-v2.yml
 
 permissions:
   contents: write
@@ -21,12 +19,10 @@ jobs:
       - name: Apply bounded source corrections
         shell: python
         run: |
-          import base64
           import hashlib
           import pathlib
           import re
 
-          # Compatibility fixture for the already-created one-shot launcher.
           audit_class = (
               "        private sealed class PendingGrantAudit\n"
               "        {\n"
@@ -54,91 +50,30 @@ jobs:
               flags=re.S)
           assert count == 1, 'repair implementation was not replaced exactly once'
 
-          root = pathlib.Path('.')
-          chunk_dir = root / '.patch'
-          chunks = sorted(chunk_dir.glob('relic.*'))
-          if [path.name for path in chunks] != [f'relic.{i:02d}' for i in range(12)]:
-              raise RuntimeError('Recovery source chunks are incomplete or out of order.')
-          encoded = ''.join(path.read_text(encoding='utf-8') for path in chunks)
-          decoded = base64.b64decode(encoded, validate=True)
-          expected = '55de4403425f8435a3d2d548b708586b6836408db4247b094ab5552b96519d0a'
-          actual = hashlib.sha256(decoded).hexdigest()
-          if actual != expected:
-              raise RuntimeError(f'Recovery source hash mismatch: {actual}')
-
-          relic_path = root / 'src/TORCareerUniques/RelicRewardIntegrity.cs'
-          mod_path = root / 'src/TORCareerUniques/ModInfrastructure.cs'
-          manifest_path = root / 'SOURCE_MANIFEST.sha256'
-          relic_path.write_bytes(decoded)
-
-          mod = mod_path.read_text(encoding='utf-8')
-          old_version = 'public override int UIVersion { get { return 10; } }'
-          if mod.count(old_version) != 1:
-              raise RuntimeError('Existing MCM UIVersion anchor was not found exactly once.')
-          mod = mod.replace(old_version,
-              'public override int UIVersion { get { return 11; } }')
-
-          old_actions = (
-              "        private static readonly Action RespawnMissingAction =\n"
-              "            AdminBridge.RespawnMissing;\n")
-          new_actions = old_actions + (
-              "        private static readonly Action RepairMissingRecoveredRelicsAction =\n"
-              "            RelicRewardIntegrity.RepairFromMcm;\n")
-          if mod.count(old_actions) != 1:
-              raise RuntimeError('Existing MCM action anchor was not found exactly once.')
-          mod = mod.replace(old_actions, new_actions)
-
-          respawn_button = (
-              "        [SettingPropertyButton(\"Respawn missing encounters\", 20, false,\n"
-              "            \"Clears cooldowns and immediately recreates every currently missing encounter. Recovered set pieces remain recovered.\", Content = \"Respawn now\")]\n")
-          recovery_button = (
-              "        [SettingPropertyButton(\"Repair missing recovered relics\", 19, false,\n"
-              "            \"Scans every living character, hero equipment set, mobile-party inventory, settlement inventory and stash before restoring anything. Existing relics are never moved. It also removes the single duplicate that the previous faulty recovery build could place in the active main inventory while the original remained on another character.\", Content = \"Repair now\")]\n"
-              "        [SettingPropertyGroup(\"Relic Encounters & Testing\", GroupOrder = 2)]\n"
-              "        public Action RepairMissingRecoveredRelics\n"
-              "        {\n"
-              "            get { return RepairMissingRecoveredRelicsAction; }\n"
-              "            set { }\n"
-              "        }\n\n")
-          if mod.count(respawn_button) != 1:
-              raise RuntimeError('Existing MCM respawn button anchor was not found exactly once.')
-          mod = mod.replace(respawn_button, recovery_button + respawn_button)
-          mod_path.write_text(mod, encoding='utf-8', newline='\n')
-
-          manifest = manifest_path.read_text(encoding='utf-8').splitlines()
-          changed = {
-              'src/TORCareerUniques/RelicRewardIntegrity.cs': relic_path,
-              'src/TORCareerUniques/ModInfrastructure.cs': mod_path,
+          expected = {
+              'relic.00': '93d144dc09f73b970961b2a6db0a377378aaf66c995bac8c3c105801468b1d69',
+              'relic.01': '60ef8b4c93c975372dde29126c32e6cc07fa93ceb018ccd5498435b1ad948aff',
+              'relic.02': '0c861dd302098c95c6051e95cd35db0bf12aff8ef00789187eb28605d1f29610',
+              'relic.03': '48e20727fe6c5aca960b641d7418bb224ec246462fb2ed7184e39782532d62f4',
+              'relic.04': 'd30d74a9f295f8951b4ad8226ecba58f12e94bb6e853726b8b94c128769ce8cc',
+              'relic.05': 'd005d529b43d1d711b09b7cceee5bf50e10c65d925b1999e99f0b6328eca1aca',
+              'relic.06': 'c1e3747c2b79525a16d3fe56e99c4810b4e206c0e531a639ded0d113dc6765f9',
+              'relic.07': 'c17562bf61d0dcdc9af3e42d71bc49c818db536a517ff1574ea93a300b650e4c',
+              'relic.08': 'a4a3916a91f7e57506a7a17b9d04d96d4651ba1c33d11011ec16cd5065836ec4',
+              'relic.09': 'd96e38eb53b5a36fd7a4e1a7cfb871e45bf0e72056d22cc7d84f5bce939e5ea0',
+              'relic.10': '8148e79ddfa619ef7d185fcb2225bdc2d0d8a92ca2a9fd1762f0883017e92f7d',
+              'relic.11': '3f44cebce951a24227bf0284f64e3557c2f1fd01c7a4236ae82707c89b4b77bf',
           }
-          for relative, path in changed.items():
-              digest = hashlib.sha256(path.read_bytes()).hexdigest()
-              matches = [index for index, line in enumerate(manifest)
-                         if line.endswith('  ' + relative)]
-              if len(matches) != 1:
-                  raise RuntimeError(f'Manifest entry missing or duplicated: {relative}')
-              manifest[matches[0]] = digest + '  ' + relative
-          manifest_path.write_text('\n'.join(manifest) + '\n', encoding='utf-8')
-
-          for path in chunk_dir.glob('*'):
-              path.unlink()
-          chunk_dir.rmdir()
-          for temporary in (
-              '.github/workflows/apply-relic-recovery-v2.yml',
-              '.github/workflows/trigger-relic-recovery-v2.yml',
-              '.github/workflows/pr-relic-recovery-v2.yml',
-              '.github/workflows/pr-relic-recovery-v2c.yml',
-          ):
-              candidate = root / temporary
-              if candidate.exists():
-                  candidate.unlink()
-          status = root / '.patch-status.log'
-          if status.exists():
-              status.unlink()
+          mismatches = []
+          for name, wanted in expected.items():
+              path = pathlib.Path('.patch') / name
+              actual = '<missing>' if not path.exists() else hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != wanted:
+                  mismatches.append(name + '=' + actual)
+          if mismatches:
+              raise RuntimeError('Chunk hash mismatch: ' + '; '.join(mismatches))
+          raise RuntimeError('All chunk hashes match; diagnostic stop.')
       - name: Commit corrected implementation
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Correct multi-character relic recovery and MCM placement"
-          git push origin HEAD:fix/relic-reward-inventory-integrity
+          exit 1
