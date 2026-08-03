@@ -12,8 +12,8 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
-[assembly: AssemblyVersion("1.7.37.0")]
-[assembly: AssemblyFileVersion("1.7.37.0")]
+[assembly: AssemblyVersion("1.7.41.0")]
+[assembly: AssemblyFileVersion("1.7.41.0")]
 
 namespace TORCareerUniques
 {
@@ -22,6 +22,7 @@ namespace TORCareerUniques
         protected override void OnSubModuleLoad()
         {
             ModLog.Initialize();
+            TorMagicItemLifecycleFix.Initialize();
             EncounterHeroDeathGuard.Initialize();
             CareerUniqueRuntime.Initialize();
             SetItemRuntime.Initialize();

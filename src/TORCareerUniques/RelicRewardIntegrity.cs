@@ -521,15 +521,11 @@ namespace TORCareerUniques
 
         internal static void RepairFromMcm()
         {
-            string result = RepairOrphanedRelicRewards(
-                new List<string>());
+            string result = RepairMissingRecoveredRelics();
             InquiryHelper.ShowMessage("Relic Reward Recovery", result);
         }
 
-        [CommandLineFunctionality.CommandLineArgumentFunction(
-            "repair_orphaned_relic_rewards", "torcu")]
-        public static string RepairOrphanedRelicRewards(
-            List<string> arguments)
+        private static string RepairMissingRecoveredRelics()
         {
             if (Campaign.Current == null || MobileParty.MainParty == null ||
                 MobileParty.MainParty.ItemRoster == null)

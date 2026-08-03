@@ -1,8 +1,8 @@
 using System;
 using System.Reflection;
 
-[assembly: AssemblyVersion("1.3.20.0")]
-[assembly: AssemblyFileVersion("1.3.20.0")]
+[assembly: AssemblyVersion("1.7.41.0")]
+[assembly: AssemblyFileVersion("1.7.41.0")]
 
 namespace TORCareerUniques
 {
@@ -23,6 +23,8 @@ namespace TORCareerUniques
 
         private static object _harmony;
         private static bool _widgetPatchInstalled;
+        private static bool _magicBackgroundPatchInstalled;
+        private static bool _itemImagePatchInstalled;
         private static bool _initialInstallAttempted;
         private static bool _assemblyLoadSubscribed;
         private static bool _installing;
@@ -31,6 +33,10 @@ namespace TORCareerUniques
         private static bool _loggedFirstClose;
         private static bool _loggedInstallFailure;
         private static bool _loggedRuntimeFailure;
+        private static bool _loggedMagicBackgroundInstalled;
+        private static bool _loggedMagicBackgroundFailure;
+        private static bool _loggedItemImageInstalled;
+        private static bool _loggedItemImageFailure;
 
         // Per-screen bridge state. These are object references on purpose: this
         // helper has no compile-time dependency on Gauntlet or CampaignSystem.
@@ -41,6 +47,8 @@ namespace TORCareerUniques
         private static Type _hoveredFieldOwnerType;
         private static FieldInfo _hoveredItemField;
         private static object _lastUnprotectedItemWidget;
+        private static MethodInfo _updateEquipmentTypeState;
+        private static MethodInfo _recoverRuntimeMagicItem;
 
         private static MethodInfo _logInfo;
         private static MethodInfo _logVerbose;
@@ -48,7 +56,7 @@ namespace TORCareerUniques
 
         public static void Tick()
         {
-            if (_widgetPatchInstalled)
+            if (AreAllPatchesInstalled())
                 return;
 
             if (!_initialInstallAttempted)
@@ -57,7 +65,7 @@ namespace TORCareerUniques
                 TryInstallWidgetPatch();
             }
 
-            if (!_widgetPatchInstalled)
+            if (!AreAllPatchesInstalled())
                 EnsureAssemblyLoadSubscription();
         }
 
@@ -204,6 +212,72 @@ namespace TORCareerUniques
                         FormatException(ex));
                 }
                 return true;
+            }
+        }
+
+
+        // Harmony prefix for TOR's TorInventoryItemTupleWidget.OnRender.
+        // Bannerlord's private updater derives the default, cannot-use, and
+        // equipment-mode brush from the item currently bound to this recycled
+        // tuple. TOR's override only assigns the magic brush and never restores
+        // the native brush when the tuple is rebound to a non-magic item.
+        public static void BeforeTorInventoryItemTupleRender(object __instance)
+        {
+            if (__instance == null || _updateEquipmentTypeState == null)
+                return;
+
+            try
+            {
+                _updateEquipmentTypeState.Invoke(__instance, null);
+            }
+            catch (Exception ex)
+            {
+                if (!_loggedMagicBackgroundFailure)
+                {
+                    _loggedMagicBackgroundFailure = true;
+                    LogError("TOR magic-item background restoration failed at " +
+                        "runtime: " + FormatException(ex));
+                }
+            }
+        }
+
+        // Harmony prefix for Bannerlord's item-image provider. The provider
+        // resolves a thumbnail request by item StringId through MBObjectManager.
+        // TOR's old weekly cleanup can leave a live roster/equipment reference
+        // after removing that index. Repair the exact referenced runtime item
+        // before the provider performs its lookup. Healthy ids return immediately.
+        public static void BeforeItemImageTextureCreation(string __0)
+        {
+            if (String.IsNullOrEmpty(__0))
+                return;
+
+            try
+            {
+                if (_recoverRuntimeMagicItem == null)
+                {
+                    Type fixType = FindType(
+                        "TORCareerUniques.TorMagicItemLifecycleFix",
+                        "TORCareerUniques");
+                    _recoverRuntimeMagicItem = fixType == null ? null :
+                        fixType.GetMethod(
+                            "RecoverReferencedRuntimeMagicItem",
+                            BindingFlags.Public | BindingFlags.NonPublic |
+                            BindingFlags.Static, null,
+                            new[] { typeof(string) }, null);
+                }
+
+                if (_recoverRuntimeMagicItem != null)
+                    _recoverRuntimeMagicItem.Invoke(null,
+                        new object[] { __0 });
+            }
+            catch (Exception ex)
+            {
+                if (!_loggedItemImageFailure)
+                {
+                    _loggedItemImageFailure = true;
+                    LogError("TOR runtime magic-item thumbnail repair failed at " +
+                        "runtime: " + FormatException(ex));
+                }
             }
         }
 
@@ -475,9 +549,16 @@ namespace TORCareerUniques
                 _hoveredItemField.GetValue(screen);
         }
 
+        private static bool AreAllPatchesInstalled()
+        {
+            return _widgetPatchInstalled &&
+                _magicBackgroundPatchInstalled &&
+                _itemImagePatchInstalled;
+        }
+
         private static void EnsureAssemblyLoadSubscription()
         {
-            if (_assemblyLoadSubscribed || _widgetPatchInstalled)
+            if (_assemblyLoadSubscribed || AreAllPatchesInstalled())
                 return;
 
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
@@ -495,7 +576,7 @@ namespace TORCareerUniques
 
         private static void OnAssemblyLoaded(object sender, AssemblyLoadEventArgs args)
         {
-            if (_widgetPatchInstalled)
+            if (AreAllPatchesInstalled())
             {
                 RemoveAssemblyLoadSubscription();
                 return;
@@ -507,6 +588,12 @@ namespace TORCareerUniques
             if (!String.Equals(name, "0Harmony", StringComparison.Ordinal) &&
                 !String.Equals(name,
                     "TaleWorlds.MountAndBlade.GauntletUI.Widgets",
+                    StringComparison.Ordinal) &&
+                !String.Equals(name, "TOR_Core", StringComparison.Ordinal) &&
+                !String.Equals(name,
+                    "TaleWorlds.MountAndBlade.GauntletUI",
+                    StringComparison.Ordinal) &&
+                !String.Equals(name, "TORCareerUniques",
                     StringComparison.Ordinal))
                 return;
 
@@ -515,7 +602,7 @@ namespace TORCareerUniques
 
         private static void TryInstallWidgetPatch()
         {
-            if (_widgetPatchInstalled || _installing)
+            if (AreAllPatchesInstalled() || _installing)
                 return;
 
             _installing = true;
@@ -524,42 +611,115 @@ namespace TORCareerUniques
                 Type harmonyType = FindType("HarmonyLib.Harmony", "0Harmony");
                 Type harmonyMethodType = FindType("HarmonyLib.HarmonyMethod",
                     "0Harmony");
-                Type screenType = FindType(
-                    "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryScreenWidget",
-                    "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
-                if (harmonyType == null || harmonyMethodType == null ||
-                    screenType == null)
-                    return;
-
-                MethodInfo original = FindMethod(screenType,
-                    "ItemWidgetHoverEnd", 1);
-                MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
-                    "BeforeInventoryScreenItemHoverEnd",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (original == null || prefix == null)
+                if (harmonyType == null || harmonyMethodType == null)
                     return;
 
                 if (_harmony == null)
                     _harmony = Activator.CreateInstance(harmonyType,
                         new object[] { HarmonyId });
 
-                ApplyPatch(harmonyType, harmonyMethodType, original, prefix);
-                _widgetPatchInstalled = true;
-                RemoveAssemblyLoadSubscription();
-                if (!_loggedInstalled)
+                if (!_widgetPatchInstalled)
                 {
-                    _loggedInstalled = true;
-                    LogInfo("Installed bounded InventoryScreenWidget armor-tooltip " +
-                        "bridge with native close restoration.");
+                    Type screenType = FindType(
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryScreenWidget",
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
+                    MethodInfo original = FindMethod(screenType,
+                        "ItemWidgetHoverEnd", 1);
+                    MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
+                        "BeforeInventoryScreenItemHoverEnd",
+                        BindingFlags.Public | BindingFlags.Static);
+                    if (original != null && prefix != null)
+                    {
+                        ApplyPatch(harmonyType, harmonyMethodType, original,
+                            prefix);
+                        _widgetPatchInstalled = true;
+                        if (!_loggedInstalled)
+                        {
+                            _loggedInstalled = true;
+                            LogInfo("Installed bounded InventoryScreenWidget " +
+                                "armor-tooltip bridge with native close " +
+                                "restoration.");
+                        }
+                    }
                 }
+
+                if (!_magicBackgroundPatchInstalled)
+                {
+                    Type torTupleType = FindType(
+                        "TOR_Core.Items.TorInventoryItemTupleWidget",
+                        "TOR_Core");
+                    Type nativeTupleType = FindType(
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryItemTupleWidget",
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
+                    MethodInfo original = FindMethod(torTupleType,
+                        "OnRender", 2);
+                    _updateEquipmentTypeState = FindMethod(nativeTupleType,
+                        "UpdateEquipmentTypeState", 0);
+                    MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
+                        "BeforeTorInventoryItemTupleRender",
+                        BindingFlags.Public | BindingFlags.Static);
+                    if (original != null &&
+                        _updateEquipmentTypeState != null && prefix != null)
+                    {
+                        ApplyPatch(harmonyType, harmonyMethodType, original,
+                            prefix);
+                        _magicBackgroundPatchInstalled = true;
+                        if (!_loggedMagicBackgroundInstalled)
+                        {
+                            _loggedMagicBackgroundInstalled = true;
+                            LogInfo("Installed TOR inventory tuple brush " +
+                                "reconciliation. Recycled non-magic rows now " +
+                                "restore Bannerlord's current native brush before " +
+                                "TOR evaluates the magic background.");
+                        }
+                    }
+                }
+
+                if (!_itemImagePatchInstalled)
+                {
+                    Type providerType = FindType(
+                        "TaleWorlds.MountAndBlade.GauntletUI.TextureProviders.ImageIdentifiers.ItemImageTextureProvider",
+                        "TaleWorlds.MountAndBlade.GauntletUI");
+                    MethodInfo original = FindMethod(providerType,
+                        "OnCreateImageWithId", 2);
+                    MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
+                        "BeforeItemImageTextureCreation",
+                        BindingFlags.Public | BindingFlags.Static);
+                    Type fixType = FindType(
+                        "TORCareerUniques.TorMagicItemLifecycleFix",
+                        "TORCareerUniques");
+                    _recoverRuntimeMagicItem = fixType == null ? null :
+                        fixType.GetMethod(
+                            "RecoverReferencedRuntimeMagicItem",
+                            BindingFlags.Public | BindingFlags.NonPublic |
+                            BindingFlags.Static, null,
+                            new[] { typeof(string) }, null);
+                    if (original != null && prefix != null &&
+                        _recoverRuntimeMagicItem != null)
+                    {
+                        ApplyPatch(harmonyType, harmonyMethodType, original,
+                            prefix);
+                        _itemImagePatchInstalled = true;
+                        if (!_loggedItemImageInstalled)
+                        {
+                            _loggedItemImageInstalled = true;
+                            LogInfo("Installed TOR runtime magic-item thumbnail " +
+                                "index repair before Bannerlord item-image cache " +
+                                "miss resolution.");
+                        }
+                    }
+                }
+
+                if (AreAllPatchesInstalled())
+                    RemoveAssemblyLoadSubscription();
             }
             catch (Exception ex)
             {
                 if (!_loggedInstallFailure)
                 {
                     _loggedInstallFailure = true;
-                    LogError("Equipped armor InventoryScreenWidget patch installation " +
-                        "failed: " + FormatException(ex));
+                    LogError("Inventory widget patch installation failed: " +
+                        FormatException(ex));
                 }
             }
             finally

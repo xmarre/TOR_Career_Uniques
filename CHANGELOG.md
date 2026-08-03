@@ -1,3 +1,14 @@
+## 1.7.41
+
+- Prevented recovered career relics from being lost when a post-battle inventory, loot, or trade transaction commits an older roster snapshot.
+- Added a bounded global ownership audit covering every living hero's battle and civilian equipment, all mobile-party inventories, settlement inventories, settlement stashes, and settlement-party inventories before any recovery action.
+- Added **Repair missing recovered relics** to the existing TOR Career Uniques MCM page; it preserves existing owners, removes only the exact duplicate created by the faulty interim recovery build, and recreates a genuinely missing relic when its old runtime record no longer exists.
+- Removed the obsolete `torcu.repair_orphaned_relic_rewards` console command and its orphan-recovery entry point.
+- Fixed recycled TOR inventory rows retaining the magic-item background after being rebound to an ordinary item by restoring Bannerlord's current native row brush before TOR evaluates the active item.
+- Replaced TOR's unsafe weekly runtime-magic-item cleanup with a reference-safe pass that checks all live rosters and every living hero equipment slot before unregistering an item object.
+- Repairs already-affected runtime magic items on an item-icon cache miss by re-registering the still-referenced item before Bannerlord resolves its thumbnail.
+- Added no campaign-map polling or recurring global scans beyond TOR's existing weekly cleanup cadence.
+
 ## 1.7.40
 
 - Restored lore-based non-aggression for roaming hosts after the shared-clan migration by rejecting protected direct and retained engage commands in both directions.
