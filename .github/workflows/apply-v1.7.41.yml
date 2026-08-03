@@ -17,158 +17,23 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: fix/multichar-relic-recovery-v2
-          fetch-depth: 0
-      - name: Apply release source atomically
+          fetch-depth: 2
+      - name: Run payload stored in parent commit
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/torcu-v1741.patch.b64 <<'PAYLOAD'
-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
-ABlIqEqJpQAA
-PAYLOAD
-          base64 --decode /tmp/torcu-v1741.patch.b64 > /tmp/torcu-v1741.patch.gz
-          printf '%s  %s\n' 'de8cd63be50f6179c972597edaee24493d7e8c991945211f2e730ce9ea63ac5b' '/tmp/torcu-v1741.patch.gz' | sha256sum --check
-          python - <<'PYNORMALIZE'
+          git show HEAD^:.github/workflows/apply-v1.7.41.yml > /tmp/parent-workflow.yml
+          python - <<'PY'
           from pathlib import Path
-          for relative in (
-              'src/TORCareerUniques/ModInfrastructure.cs',
-              'src/TORCareerUniques/RelicRewardIntegrity.cs',
-              'src/TORCareerUniques.UIIconPassThrough/UIIconPassThrough.cs',
-          ):
-              path = Path(relative)
-              path.write_text(path.read_text(encoding='utf-8'),
-                  encoding='utf-8', newline='\n')
-          PYNORMALIZE
-          gzip --decompress --stdout /tmp/torcu-v1741.patch.gz | patch -p1
-          python - <<'PYCRLF'
-          from pathlib import Path
-          for relative in (
-              'src/TORCareerUniques/ModInfrastructure.cs',
-              'src/TORCareerUniques/RelicRewardIntegrity.cs',
-              'src/TORCareerUniques/TorMagicItemLifecycleFix.cs',
-              'src/TORCareerUniques.UIIconPassThrough/UIIconPassThrough.cs',
-          ):
-              path = Path(relative)
-              text = path.read_text(encoding='utf-8').replace('\r\n', '\n')
-              path.write_bytes(text.replace('\n', '\r\n').encode('utf-8'))
-          PYCRLF
-          rm .github/workflows/apply-v1.7.41.yml
-          python - <<'PYMANIFEST'
-          from pathlib import Path
-          import hashlib
-
-          root = Path('.')
-          entries = []
-          for path in root.rglob('*'):
-              if not path.is_file():
-                  continue
-              relative = path.relative_to(root).as_posix()
-              if relative == 'SOURCE_MANIFEST.sha256':
-                  continue
-              if relative.split('/', 1)[0] in {'.git', 'artifacts'}:
-                  continue
-              entries.append((relative, path))
-          entries.sort(key=lambda entry: entry[0])
-          lines = [
-              hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + relative
-              for relative, path in entries
-          ]
-          (root / 'SOURCE_MANIFEST.sha256').write_text(
-              '\n'.join(lines) + '\n', encoding='ascii', newline='\n')
-          PYMANIFEST
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Prepare v1.7.41'
-          git push origin HEAD:fix/multichar-relic-recovery-v2
+          lines = Path('/tmp/parent-workflow.yml').read_text(encoding='utf-8').splitlines()
+          marker = '      - name: Apply release source atomically'
+          start = lines.index(marker)
+          run = next(i for i in range(start + 1, len(lines)) if lines[i] == '        run: |')
+          body = []
+          for line in lines[run + 1:]:
+              if line and not line.startswith('          '):
+                  break
+              body.append(line[10:] if line.startswith('          ') else '')
+          Path('/tmp/apply-v1741.sh').write_text('\n'.join(body) + '\n', encoding='utf-8')
+          PY
+          bash /tmp/apply-v1741.sh
