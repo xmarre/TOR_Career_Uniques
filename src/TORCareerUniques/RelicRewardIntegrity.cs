@@ -742,7 +742,9 @@ namespace TORCareerUniques
             if (!TryScanRelicOccurrences(careerId, out verification,
                 out scanError))
             {
-                error = "post-restore ownership verification failed: " + scanError;
+                error = "the relic was restored, but post-restore ownership " +
+                    "verification failed: " + scanError +
+                    ". Do not repeat the repair before the log is checked.";
                 return false;
             }
             for (int i = 0; i < verification.Count; i++)
@@ -750,7 +752,8 @@ namespace TORCareerUniques
                 if (verification[i].IsMainRoster)
                     return true;
             }
-            error = "the restored relic was not retained in the active main inventory";
+            error = "the relic was restored, but it was not retained in the " +
+                "active main inventory";
             return false;
         }
 
@@ -827,9 +830,9 @@ namespace TORCareerUniques
                 }
 
                 IEnumerable heroes;
-                if (!TryGetAllAliveHeroes(out heroes))
+                if (!TryGetAllReferencedHeroes(out heroes))
                 {
-                    error = "Bannerlord's complete living-hero registry could not " +
+                    error = "Bannerlord's complete hero registry could not " +
                         "be read; repair was aborted to avoid duplicating a relic on " +
                         "another playable character.";
                     return false;
@@ -1051,22 +1054,47 @@ namespace TORCareerUniques
             }
         }
 
-        private static bool TryGetAllAliveHeroes(out IEnumerable heroes)
+        private static bool TryGetAllReferencedHeroes(out IEnumerable heroes)
         {
             heroes = null;
             try
             {
-                PropertyInfo property = typeof(Hero).GetProperty(
-                    "AllAliveHeroes", BindingFlags.Public |
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (property == null)
-                    return false;
-                heroes = property.GetValue(null, null) as IEnumerable;
-                return heroes != null;
+                ArrayList result = new ArrayList();
+                HashSet<Hero> visited = new HashSet<Hero>();
+                string[] registryNames =
+                {
+                    "AllAliveHeroes",
+                    "DeadOrDisabledHeroes"
+                };
+                for (int i = 0; i < registryNames.Length; i++)
+                {
+                    PropertyInfo property = typeof(Hero).GetProperty(
+                        registryNames[i], BindingFlags.Public |
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    if (property == null)
+                    {
+                        if (i == 0)
+                            return false;
+                        continue;
+                    }
+
+                    IEnumerable values = property.GetValue(null, null) as
+                        IEnumerable;
+                    if (values == null)
+                        return false;
+                    foreach (object value in values)
+                    {
+                        Hero hero = value as Hero;
+                        if (hero != null && visited.Add(hero))
+                            result.Add(hero);
+                    }
+                }
+                heroes = result;
+                return true;
             }
             catch (Exception ex)
             {
-                ModLog.Error("Living-hero registry scan failed: " +
+                ModLog.Error("Complete hero registry scan failed: " +
                     ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
@@ -1153,9 +1181,9 @@ namespace TORCareerUniques
                 }
 
                 IEnumerable heroes;
-                if (!TryGetAllAliveHeroes(out heroes))
+                if (!TryGetAllReferencedHeroes(out heroes))
                 {
-                    error = "the complete living-hero registry was unavailable";
+                    error = "the complete hero registry was unavailable";
                     return false;
                 }
                 HashSet<Hero> visitedHeroes = new HashSet<Hero>();

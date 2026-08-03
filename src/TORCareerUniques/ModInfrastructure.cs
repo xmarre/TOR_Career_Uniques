@@ -56,6 +56,7 @@ namespace TORCareerUniques
 
         protected override void OnBeforeInitialModuleScreenSetAsRoot()
         {
+            TorMagicItemLifecycleFix.ResetSession();
             RuntimePerformanceGate.ResetSession();
             EncounterAffinityRuntime.ResetSession();
             base.OnBeforeInitialModuleScreenSetAsRoot();
@@ -63,6 +64,7 @@ namespace TORCareerUniques
 
         protected override void OnSubModuleUnloaded()
         {
+            TorMagicItemLifecycleFix.ResetSession();
             RuntimePerformanceGate.ResetSession();
             EncounterAffinityRuntime.ResetSession();
             base.OnSubModuleUnloaded();

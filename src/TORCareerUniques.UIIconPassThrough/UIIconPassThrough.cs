@@ -47,6 +47,7 @@ namespace TORCareerUniques
         private static Type _hoveredFieldOwnerType;
         private static FieldInfo _hoveredItemField;
         private static object _lastUnprotectedItemWidget;
+        private static Type _nativeTupleType;
         private static MethodInfo _updateEquipmentTypeState;
         private static MethodInfo _recoverRuntimeMagicItem;
 
@@ -223,7 +224,9 @@ namespace TORCareerUniques
         // the native brush when the tuple is rebound to a non-magic item.
         public static void BeforeTorInventoryItemTupleRender(object __instance)
         {
-            if (__instance == null || _updateEquipmentTypeState == null)
+            if (__instance == null || _nativeTupleType == null ||
+                _updateEquipmentTypeState == null ||
+                !_nativeTupleType.IsInstanceOfType(__instance))
                 return;
 
             try
@@ -623,8 +626,11 @@ namespace TORCareerUniques
                     Type screenType = FindType(
                         "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryScreenWidget",
                         "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
-                    MethodInfo original = FindMethod(screenType,
-                        "ItemWidgetHoverEnd", 1);
+                    Type itemButtonType = FindType(
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryItemButtonWidget",
+                        "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
+                    MethodInfo original = FindInstanceMethod(screenType,
+                        "ItemWidgetHoverEnd", true, itemButtonType);
                     MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
                         "BeforeInventoryScreenItemHoverEnd",
                         BindingFlags.Public | BindingFlags.Static);
@@ -651,10 +657,18 @@ namespace TORCareerUniques
                     Type nativeTupleType = FindType(
                         "TaleWorlds.MountAndBlade.GauntletUI.Widgets.Inventory.InventoryItemTupleWidget",
                         "TaleWorlds.MountAndBlade.GauntletUI.Widgets");
-                    MethodInfo original = FindMethod(torTupleType,
-                        "OnRender", 2);
-                    _updateEquipmentTypeState = FindMethod(nativeTupleType,
-                        "UpdateEquipmentTypeState", 0);
+                    Type twoDimensionContextType = FindType(
+                        "TaleWorlds.TwoDimension.TwoDimensionContext",
+                        "TaleWorlds.TwoDimension");
+                    Type drawContextType = FindType(
+                        "TaleWorlds.TwoDimension.TwoDimensionDrawContext",
+                        "TaleWorlds.TwoDimension");
+                    MethodInfo original = FindInstanceMethod(torTupleType,
+                        "OnRender", true, twoDimensionContextType,
+                        drawContextType);
+                    _nativeTupleType = nativeTupleType;
+                    _updateEquipmentTypeState = FindInstanceMethod(
+                        nativeTupleType, "UpdateEquipmentTypeState", true);
                     MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
                         "BeforeTorInventoryItemTupleRender",
                         BindingFlags.Public | BindingFlags.Static);
@@ -680,8 +694,9 @@ namespace TORCareerUniques
                     Type providerType = FindType(
                         "TaleWorlds.MountAndBlade.GauntletUI.TextureProviders.ImageIdentifiers.ItemImageTextureProvider",
                         "TaleWorlds.MountAndBlade.GauntletUI");
-                    MethodInfo original = FindMethod(providerType,
-                        "OnCreateImageWithId", 2);
+                    MethodInfo original = FindInstanceMethod(providerType,
+                        "OnCreateImageWithId", true, typeof(string),
+                        typeof(string));
                     MethodInfo prefix = typeof(UIIconPassThrough).GetMethod(
                         "BeforeItemImageTextureCreation",
                         BindingFlags.Public | BindingFlags.Static);
@@ -813,20 +828,22 @@ namespace TORCareerUniques
                 : null;
         }
 
-        private static MethodInfo FindMethod(Type type, string name,
-            int parameterCount)
+        private static MethodInfo FindInstanceMethod(Type type, string name,
+            bool declaredOnly, params Type[] parameterTypes)
         {
-            if (type == null)
+            if (type == null || parameterTypes == null)
                 return null;
-            MethodInfo[] methods = type.GetMethods(BindingFlags.Public |
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            for (int i = 0; i < methods.Length; i++)
+            for (int i = 0; i < parameterTypes.Length; i++)
             {
-                if (methods[i].Name == name &&
-                    methods[i].GetParameters().Length == parameterCount)
-                    return methods[i];
+                if (parameterTypes[i] == null)
+                    return null;
             }
-            return null;
+
+            BindingFlags flags = BindingFlags.Public |
+                BindingFlags.NonPublic | BindingFlags.Instance;
+            if (declaredOnly)
+                flags |= BindingFlags.DeclaredOnly;
+            return type.GetMethod(name, flags, null, parameterTypes, null);
         }
 
         private static void ApplyPatch(Type harmonyType,

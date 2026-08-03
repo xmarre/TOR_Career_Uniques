@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
@@ -26,18 +28,48 @@ namespace TORCareerUniques
         private const string HarmonyId =
             "torcareeruniques.tor-runtime-magic-item-lifetime.1.7.41";
 
-        private static MethodInfo _hasAnyLootTraits;
-        private static MethodInfo _isRuntimeDuplicatedItem;
-        private static bool _installed;
-        private static bool _loggedRepairFailure;
-        private static bool _loggedOwnershipScanFailure;
+        private static readonly object RecoverySync = new object();
         private static readonly HashSet<string> RepairingIds =
+            new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> UnrecoverableIds =
             new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> LoggedRetainedIds =
             new HashSet<string>(StringComparer.Ordinal);
 
+        private static MethodInfo _hasAnyLootTraits;
+        private static MethodInfo _isRuntimeDuplicatedItem;
+        private static Type _encounterTypeForLootRoster;
+        private static PropertyInfo _pendingLootRosterProperty;
+        private static object _campaignSession;
+        private static bool _installed;
+        private static bool _loggedRepairFailure;
+        private static bool _loggedOwnershipScanFailure;
+
         [ThreadStatic]
         private static int _cleanupDepth;
+        [ThreadStatic]
+        private static bool _cleanupScanFailed;
+        [ThreadStatic]
+        private static HashSet<ItemObject> _protectedCleanupReferences;
+        [ThreadStatic]
+        private static HashSet<ItemObject> _globalCleanupReferences;
+
+        private sealed class ItemObjectReferenceComparer :
+            IEqualityComparer<ItemObject>
+        {
+            internal static readonly ItemObjectReferenceComparer Instance =
+                new ItemObjectReferenceComparer();
+
+            public bool Equals(ItemObject left, ItemObject right)
+            {
+                return Object.ReferenceEquals(left, right);
+            }
+
+            public int GetHashCode(ItemObject item)
+            {
+                return item == null ? 0 : RuntimeHelpers.GetHashCode(item);
+            }
+        }
 
         internal static void Initialize()
         {
@@ -114,8 +146,9 @@ namespace TORCareerUniques
                 _installed = true;
                 ModLog.AlwaysInfo(
                     "Installed reference-safe TOR runtime magic-item lifetime " +
-                    "guards. TOR's weekly cleanup keeps its original removal " +
-                    "scope and can no longer unregister a live item reference.");
+                    "guards. TOR's weekly cleanup keeps its original roster " +
+                    "removal scope and can no longer unregister a live item " +
+                    "reference.");
             }
             catch (Exception ex)
             {
@@ -124,8 +157,58 @@ namespace TORCareerUniques
             }
         }
 
+        internal static void ResetSession()
+        {
+            lock (RecoverySync)
+            {
+                ClearRecoveryStateLocked();
+                _campaignSession = null;
+            }
+            _loggedRepairFailure = false;
+            _loggedOwnershipScanFailure = false;
+            _encounterTypeForLootRoster = null;
+            _pendingLootRosterProperty = null;
+        }
+
+        private static void ClearRecoveryStateLocked()
+        {
+            RepairingIds.Clear();
+            UnrecoverableIds.Clear();
+            LoggedRetainedIds.Clear();
+        }
+
+        private static void EnsureRecoverySessionLocked()
+        {
+            object campaign = Campaign.Current;
+            if (Object.ReferenceEquals(_campaignSession, campaign))
+                return;
+            ClearRecoveryStateLocked();
+            _campaignSession = campaign;
+        }
+
         private static void BeforeRemovedUnusedLootItems()
         {
+            if (_cleanupDepth == 0)
+            {
+                _cleanupScanFailed = false;
+                _protectedCleanupReferences = null;
+                _globalCleanupReferences = null;
+                lock (RecoverySync)
+                {
+                    EnsureRecoverySessionLocked();
+                    UnrecoverableIds.Clear();
+                }
+
+                try
+                {
+                    BuildCleanupReferenceCaches();
+                }
+                catch (Exception ex)
+                {
+                    _cleanupScanFailed = true;
+                    LogOwnershipScanFailure(ex);
+                }
+            }
             _cleanupDepth++;
         }
 
@@ -134,36 +217,38 @@ namespace TORCareerUniques
         {
             if (_cleanupDepth > 0)
                 _cleanupDepth--;
+            if (_cleanupDepth == 0)
+            {
+                _cleanupScanFailed = false;
+                _protectedCleanupReferences = null;
+                _globalCleanupReferences = null;
+            }
             return __exception;
         }
 
         // During TOR's candidate query, hide items found in authoritative player
-        // locations or any living hero equipment. The original cleanup therefore
-        // never mutates those items. Unprotected candidates retain TOR's behavior.
+        // locations or any hero equipment. The reference set is built once for the
+        // weekly pass, so candidate checks remain constant-time.
         private static void AfterHasAnyLootTraits(ItemObject __0,
             ref bool __result)
         {
             if (_cleanupDepth <= 0 || !__result || __0 == null)
                 return;
 
-            try
-            {
-                if (HasProtectedReference(__0))
-                    __result = false;
-            }
-            catch (Exception ex)
+            if (_cleanupScanFailed || _protectedCleanupReferences == null ||
+                _protectedCleanupReferences.Contains(__0))
             {
                 // Ownership uncertainty must never fall through to TOR's
                 // destructive cleanup path. Skip this candidate and retain it.
                 __result = false;
-                LogOwnershipScanFailure(ex);
             }
         }
 
-        // TOR removes foreign settlement/lord-party stacks before unregistering.
-        // Re-scan every live reference at that final lifetime boundary. A remaining
-        // roster/equipment reference makes unregistration invalid regardless of
-        // ownership, because the ItemObject is still reachable by the game.
+        // The pass-level global set reflects every reference at cleanup entry. TOR
+        // may remove unprotected stacks during the pass; retaining their object
+        // registration until the next weekly pass is harmless and avoids repeating
+        // a full world traversal for every cleanup candidate. Items with no entry
+        // reference are unregistered normally in the current pass.
         private static bool BeforeUnregisterObject(MBObjectBase __0)
         {
             if (_cleanupDepth <= 0)
@@ -172,27 +257,108 @@ namespace TORCareerUniques
             ItemObject item = __0 as ItemObject;
             if (item == null)
                 return true;
-
-            try
-            {
-                if (!HasAnyGlobalReference(item))
-                    return true;
-            }
-            catch (Exception ex)
-            {
-                // A failed final reference proof cannot authorize object
-                // destruction. Retain the item and let the next weekly pass retry.
-                LogOwnershipScanFailure(ex);
+            if (_cleanupScanFailed || _globalCleanupReferences == null)
                 return false;
-            }
+            if (!_globalCleanupReferences.Contains(item))
+                return true;
 
             string id = item.StringId ?? "<no-id>";
-            if (LoggedRetainedIds.Add(id))
+            bool shouldLog;
+            lock (RecoverySync)
+                shouldLog = LoggedRetainedIds.Add(id);
+            if (shouldLog)
             {
                 ModLog.Info("Prevented TOR's weekly cleanup from unregistering " +
                     "still-referenced magic item '" + id + "'.");
             }
             return false;
+        }
+
+        private static void BuildCleanupReferenceCaches()
+        {
+            HashSet<ItemObject> protectedItems = new HashSet<ItemObject>(
+                ItemObjectReferenceComparer.Instance);
+            HashSet<ItemObject> globalItems = new HashSet<ItemObject>(
+                ItemObjectReferenceComparer.Instance);
+            HashSet<Settlement> protectedSettlements =
+                GetProtectedSettlements();
+            Clan playerClan = Clan.PlayerClan;
+
+            foreach (MobileParty party in MobileParty.All)
+            {
+                if (party == null)
+                    continue;
+                AddRosterItems(party.ItemRoster, globalItems);
+                bool playerParty =
+                    Object.ReferenceEquals(party, MobileParty.MainParty) ||
+                    (playerClan != null &&
+                        (Object.ReferenceEquals(party.ActualClan, playerClan) ||
+                         (party.LeaderHero != null &&
+                          Object.ReferenceEquals(party.LeaderHero.Clan,
+                              playerClan))));
+                if (playerParty)
+                    AddRosterItems(party.ItemRoster, protectedItems);
+            }
+
+            foreach (Settlement settlement in Settlement.All)
+            {
+                if (settlement == null)
+                    continue;
+                AddRosterItems(settlement.ItemRoster, globalItems);
+                AddRosterItems(settlement.Stash, globalItems);
+                AddRosterItems(settlement.Party == null ? null :
+                    settlement.Party.ItemRoster, globalItems);
+                if (!protectedSettlements.Contains(settlement))
+                    continue;
+                AddRosterItems(settlement.ItemRoster, protectedItems);
+                AddRosterItems(settlement.Stash, protectedItems);
+                AddRosterItems(settlement.Party == null ? null :
+                    settlement.Party.ItemRoster, protectedItems);
+            }
+
+            foreach (Hero hero in EnumerateReferencedHeroes())
+            {
+                if (hero == null)
+                    continue;
+                AddEquipmentItems(hero.BattleEquipment, globalItems);
+                AddEquipmentItems(hero.CivilianEquipment, globalItems);
+                AddEquipmentItems(hero.BattleEquipment, protectedItems);
+                AddEquipmentItems(hero.CivilianEquipment, protectedItems);
+            }
+
+            ItemRoster pendingLoot = GetPendingPlayerLootRoster();
+            AddRosterItems(pendingLoot, globalItems);
+            AddRosterItems(pendingLoot, protectedItems);
+            _protectedCleanupReferences = protectedItems;
+            _globalCleanupReferences = globalItems;
+        }
+
+        private static void AddRosterItems(ItemRoster roster,
+            HashSet<ItemObject> target)
+        {
+            if (roster == null || target == null)
+                return;
+            foreach (ItemRosterElement element in roster)
+            {
+                ItemObject item = element.EquipmentElement.Item;
+                if (element.Amount > 0 && item != null)
+                    target.Add(item);
+            }
+        }
+
+        private static void AddEquipmentItems(Equipment equipment,
+            HashSet<ItemObject> target)
+        {
+            if (equipment == null || target == null)
+                return;
+            for (int i = 0;
+                i < (int)EquipmentIndex.NumEquipmentSetSlots; i++)
+            {
+                ItemObject item = equipment.GetEquipmentFromSlot(
+                    (EquipmentIndex)i).Item;
+                if (item != null)
+                    target.Add(item);
+            }
         }
 
         private static void LogOwnershipScanFailure(Exception ex)
@@ -206,15 +372,35 @@ namespace TORCareerUniques
                 ". The affected item was retained.");
         }
 
-        // Called reflectively by the item-image provider prefix. Healthy ids are
-        // constant-time. An already-damaged id is located only in live rosters and
-        // equipment, validated as TOR runtime magical loot, and re-registered
-        // before Bannerlord performs its thumbnail lookup.
+        // Called reflectively by ItemImageTextureProvider.OnCreateImageWithId.
+        // That method is entered synchronously from TextureProvider.Tick before
+        // Bannerlord starts thumbnail generation, so the item must be repaired in
+        // this call. Shared retry/cache state is locked in case another caller
+        // reaches the helper concurrently.
         internal static bool RecoverReferencedRuntimeMagicItem(string itemId)
         {
-            if (String.IsNullOrEmpty(itemId) ||
-                !RepairingIds.Add(itemId))
+            if (String.IsNullOrEmpty(itemId))
                 return false;
+            MBObjectManager manager = MBObjectManager.Instance;
+            if (manager == null)
+                return false;
+            if (manager.GetObject<ItemObject>(itemId) != null)
+            {
+                lock (RecoverySync)
+                {
+                    EnsureRecoverySessionLocked();
+                    UnrecoverableIds.Remove(itemId);
+                }
+                return false;
+            }
+
+            lock (RecoverySync)
+            {
+                EnsureRecoverySessionLocked();
+                if (UnrecoverableIds.Contains(itemId) ||
+                    !RepairingIds.Add(itemId))
+                    return false;
+            }
 
             try
             {
@@ -222,22 +408,23 @@ namespace TORCareerUniques
                     _isRuntimeDuplicatedItem == null)
                     return false;
 
-                MBObjectManager manager = MBObjectManager.Instance;
-                if (manager == null ||
-                    manager.GetObject<ItemObject>(itemId) != null)
-                    return false;
-
                 ItemObject item = FindReferencedItemById(itemId);
                 if (item == null || item.IsCraftedByPlayer ||
                     !InvokeItemPredicate(_hasAnyLootTraits, item) ||
                     !InvokeItemPredicate(_isRuntimeDuplicatedItem, item))
+                {
+                    lock (RecoverySync)
+                        UnrecoverableIds.Add(itemId);
                     return false;
+                }
 
                 manager.RegisterObject(item);
                 bool repaired = Object.ReferenceEquals(
                     manager.GetObject<ItemObject>(itemId), item);
                 if (repaired)
                 {
+                    lock (RecoverySync)
+                        UnrecoverableIds.Remove(itemId);
                     ModLog.AlwaysInfo("Re-registered referenced TOR runtime " +
                         "magic item '" + itemId +
                         "' after an earlier unsafe cleanup removed its object " +
@@ -258,7 +445,8 @@ namespace TORCareerUniques
             }
             finally
             {
-                RepairingIds.Remove(itemId);
+                lock (RecoverySync)
+                    RepairingIds.Remove(itemId);
             }
         }
 
@@ -267,54 +455,6 @@ namespace TORCareerUniques
         {
             object result = predicate.Invoke(null, new object[] { item });
             return result is bool && (bool)result;
-        }
-
-        private static bool HasProtectedReference(ItemObject item)
-        {
-            if (item == null)
-                return false;
-
-            Clan playerClan = Clan.PlayerClan;
-            foreach (MobileParty party in MobileParty.All)
-            {
-                if (party == null || party.ItemRoster == null)
-                    continue;
-
-                bool playerParty =
-                    Object.ReferenceEquals(party, MobileParty.MainParty) ||
-                    (playerClan != null &&
-                        (Object.ReferenceEquals(party.ActualClan, playerClan) ||
-                         (party.LeaderHero != null &&
-                          Object.ReferenceEquals(party.LeaderHero.Clan,
-                              playerClan))));
-                if (playerParty && RosterContains(party.ItemRoster, item))
-                    return true;
-            }
-
-            HashSet<Settlement> protectedSettlements =
-                GetProtectedSettlements();
-            foreach (Settlement settlement in protectedSettlements)
-            {
-                if (settlement != null &&
-                    (RosterContains(settlement.ItemRoster, item) ||
-                     RosterContains(settlement.Stash, item) ||
-                     RosterContains(settlement.Party == null ? null :
-                         settlement.Party.ItemRoster, item)))
-                    return true;
-            }
-
-            // TOR's original scan uses CharacterObject armour only. The actual
-            // live state is both Equipment sets for every living Hero, including
-            // weapon slots and inactive multi-character protagonists.
-            foreach (Hero hero in Hero.AllAliveHeroes)
-            {
-                if (hero != null &&
-                    (EquipmentContains(hero.BattleEquipment, item) ||
-                     EquipmentContains(hero.CivilianEquipment, item)))
-                    return true;
-            }
-
-            return RosterContains(GetPendingPlayerLootRoster(), item);
         }
 
         private static HashSet<Settlement> GetProtectedSettlements()
@@ -355,33 +495,28 @@ namespace TORCareerUniques
             return result;
         }
 
-        private static bool HasAnyGlobalReference(ItemObject item)
+        private static IEnumerable<Hero> EnumerateReferencedHeroes()
         {
-            foreach (MobileParty party in MobileParty.All)
-            {
-                if (party != null && RosterContains(party.ItemRoster, item))
-                    return true;
-            }
-
-            foreach (Settlement settlement in Settlement.All)
-            {
-                if (settlement != null &&
-                    (RosterContains(settlement.ItemRoster, item) ||
-                     RosterContains(settlement.Stash, item) ||
-                     RosterContains(settlement.Party == null ? null :
-                         settlement.Party.ItemRoster, item)))
-                    return true;
-            }
-
+            HashSet<Hero> visited = new HashSet<Hero>();
             foreach (Hero hero in Hero.AllAliveHeroes)
             {
-                if (hero != null &&
-                    (EquipmentContains(hero.BattleEquipment, item) ||
-                     EquipmentContains(hero.CivilianEquipment, item)))
-                    return true;
+                if (hero != null && visited.Add(hero))
+                    yield return hero;
             }
 
-            return RosterContains(GetPendingPlayerLootRoster(), item);
+            PropertyInfo property = typeof(Hero).GetProperty(
+                "DeadOrDisabledHeroes", BindingFlags.Public |
+                BindingFlags.NonPublic | BindingFlags.Static);
+            IEnumerable values = property == null ? null :
+                property.GetValue(null, null) as IEnumerable;
+            if (values == null)
+                yield break;
+            foreach (object value in values)
+            {
+                Hero hero = value as Hero;
+                if (hero != null && visited.Add(hero))
+                    yield return hero;
+            }
         }
 
         private static ItemObject FindReferencedItemById(string itemId)
@@ -406,7 +541,7 @@ namespace TORCareerUniques
                     return item;
             }
 
-            foreach (Hero hero in Hero.AllAliveHeroes)
+            foreach (Hero hero in EnumerateReferencedHeroes())
             {
                 if (hero == null)
                     continue;
@@ -421,37 +556,23 @@ namespace TORCareerUniques
 
         private static ItemRoster GetPendingPlayerLootRoster()
         {
-            try
+            object encounter = PlayerEncounter.Current;
+            if (encounter == null)
+                return null;
+
+            Type encounterType = encounter.GetType();
+            if (encounterType != _encounterTypeForLootRoster)
             {
-                object encounter = PlayerEncounter.Current;
-                if (encounter == null)
-                    return null;
-                PropertyInfo property = encounter.GetType().GetProperty(
+                _encounterTypeForLootRoster = encounterType;
+                _pendingLootRosterProperty = encounterType.GetProperty(
                     "RosterToReceiveLootItems",
                     BindingFlags.Public | BindingFlags.NonPublic |
                     BindingFlags.Instance);
-                return property == null ? null :
-                    property.GetValue(encounter, null) as ItemRoster;
             }
-            catch
-            {
-                return null;
-            }
-        }
 
-        private static bool RosterContains(ItemRoster roster,
-            ItemObject item)
-        {
-            if (roster == null || item == null)
-                return false;
-            foreach (ItemRosterElement element in roster)
-            {
-                if (element.Amount > 0 &&
-                    Object.ReferenceEquals(element.EquipmentElement.Item,
-                        item))
-                    return true;
-            }
-            return false;
+            return _pendingLootRosterProperty == null ? null :
+                _pendingLootRosterProperty.GetValue(encounter, null)
+                    as ItemRoster;
         }
 
         private static ItemObject FindInRoster(ItemRoster roster,
@@ -468,22 +589,6 @@ namespace TORCareerUniques
                     return item;
             }
             return null;
-        }
-
-        private static bool EquipmentContains(Equipment equipment,
-            ItemObject item)
-        {
-            if (equipment == null || item == null)
-                return false;
-            for (int i = 0;
-                i < (int)EquipmentIndex.NumEquipmentSetSlots; i++)
-            {
-                EquipmentElement element = equipment.GetEquipmentFromSlot(
-                    (EquipmentIndex)i);
-                if (Object.ReferenceEquals(element.Item, item))
-                    return true;
-            }
-            return false;
         }
 
         private static ItemObject FindInEquipment(Equipment equipment,
