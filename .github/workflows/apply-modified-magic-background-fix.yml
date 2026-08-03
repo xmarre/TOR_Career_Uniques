@@ -29,39 +29,27 @@ jobs:
           raw = lifecycle.read_bytes()
           crlf = b'\r\n' in raw
           text = raw.decode('utf-8').replace('\r\n', '\n')
+          lines = text.split('\n')
 
-          initialize_old = '''        internal static void Initialize()
-          {
-              if (_installed)
-          '''
-          initialize_new = '''        internal static void Initialize()
-          {
-              TorMagicItemInventoryClassificationFix.Initialize();
-              if (_installed)
-          '''
-          if 'TorMagicItemInventoryClassificationFix.Initialize();' not in text:
-              if initialize_old not in text:
-                  raise RuntimeError('TorMagicItemLifecycleFix.Initialize anchor was not found.')
-              text = text.replace(initialize_old, initialize_new, 1)
+          if not any('TorMagicItemInventoryClassificationFix.Initialize();' in line for line in lines):
+              method = next(i for i, line in enumerate(lines)
+                            if line.strip() == 'internal static void Initialize()')
+              opening = next(i for i in range(method + 1, len(lines))
+                             if lines[i].strip() == '{')
+              indent = lines[opening][:len(lines[opening]) - len(lines[opening].lstrip())] + '    '
+              lines.insert(opening + 1,
+                           indent + 'TorMagicItemInventoryClassificationFix.Initialize();')
 
-          reset_old = '''            _encounterTypeForLootRoster = null;
-              _pendingLootRosterProperty = null;
-          }
+          if not any('TorMagicItemInventoryClassificationFix.ResetSession();' in line for line in lines):
+              method = next(i for i, line in enumerate(lines)
+                            if line.strip() == 'internal static void ResetSession()')
+              target = next(i for i in range(method + 1, len(lines))
+                            if lines[i].strip() == '_pendingLootRosterProperty = null;')
+              indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+              lines.insert(target + 1,
+                           indent + 'TorMagicItemInventoryClassificationFix.ResetSession();')
 
-          private static void ClearRecoveryStateLocked()
-          '''
-          reset_new = '''            _encounterTypeForLootRoster = null;
-              _pendingLootRosterProperty = null;
-              TorMagicItemInventoryClassificationFix.ResetSession();
-          }
-
-          private static void ClearRecoveryStateLocked()
-          '''
-          if 'TorMagicItemInventoryClassificationFix.ResetSession();' not in text:
-              if reset_old not in text:
-                  raise RuntimeError('TorMagicItemLifecycleFix.ResetSession anchor was not found.')
-              text = text.replace(reset_old, reset_new, 1)
-
+          text = '\n'.join(lines)
           newline = '\r\n' if crlf else '\n'
           lifecycle.write_bytes(text.replace('\n', newline).encode('utf-8'))
 
