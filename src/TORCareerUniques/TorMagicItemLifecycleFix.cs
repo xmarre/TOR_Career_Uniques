@@ -73,6 +73,7 @@ namespace TORCareerUniques
 
         internal static void Initialize()
         {
+            TorMagicItemInventoryClassificationFix.Initialize();
             if (_installed)
                 return;
 
@@ -168,6 +169,7 @@ namespace TORCareerUniques
             _loggedOwnershipScanFailure = false;
             _encounterTypeForLootRoster = null;
             _pendingLootRosterProperty = null;
+            TorMagicItemInventoryClassificationFix.ResetSession();
         }
 
         private static void ClearRecoveryStateLocked()

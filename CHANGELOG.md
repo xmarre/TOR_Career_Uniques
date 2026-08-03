@@ -5,6 +5,7 @@
 - Added **Repair missing recovered relics** to the existing TOR Career Uniques MCM page; it preserves existing owners, removes only the exact duplicate created by the faulty interim recovery build, and recreates a genuinely missing relic when its old runtime record no longer exists.
 - Removed the obsolete `torcu.repair_orphaned_relic_rewards` console command and its orphan-recovery entry point.
 - Fixed recycled TOR inventory rows retaining the magic-item background after being rebound to an ordinary item by restoring Bannerlord's current native row brush before TOR evaluates the active item.
+- Fixed TOR inventory magic-item detection for items carrying a separately rolled loot modifier, including Warden's Spear of the Wild Hunt, so they retain the purple background while unequipped.
 - Replaced TOR's unsafe weekly runtime-magic-item cleanup with a reference-safe pass that checks all live rosters and every living hero equipment slot before unregistering an item object.
 - Repairs already-affected runtime magic items on an item-icon cache miss by re-registering the still-referenced item before Bannerlord resolves its thumbnail.
 - Added no campaign-map polling or recurring global scans beyond TOR's existing weekly cleanup cadence.

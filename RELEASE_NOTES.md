@@ -5,6 +5,7 @@
 - Preserves relics on inactive shared characters and other existing owners, removes only the exact duplicate created by the faulty interim recovery build, and recreates a genuinely missing relic when its saved runtime record is gone.
 - Removes the obsolete orphan-recovery console command.
 - Fixes ordinary inventory rows inheriting TOR's magic-item background when Gauntlet recycles a row previously used for a magic item.
+- Fixes magic items with separately rolled loot modifiers, including Warden's Spear of the Wild Hunt, losing the purple background while shown as unequipped inventory rows.
 - Prevents TOR's weekly cleanup from unregistering a runtime magic item that is still equipped or stored in a live player-owned location.
 - Repairs icons already broken by an earlier unsafe cleanup when Bannerlord next requests the item's thumbnail.
 - Retains the v1.7.40 lore-affinity and encounter-strength fixes and all earlier companion-set, load-time, and Grey Lord/Cowl fixes.
