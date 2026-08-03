@@ -1,0 +1,24 @@
+{
+  "runtimeTarget": {
+    "name": ".NETStandard,Version=v2.0/",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETStandard,Version=v2.0": {},
+    ".NETStandard,Version=v2.0/": {
+      "TORCareerUniques.UIIconPassThrough/1.0.0": {
+        "runtime": {
+          "TORCareerUniques.UIIconPassThrough.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "TORCareerUniques.UIIconPassThrough/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
