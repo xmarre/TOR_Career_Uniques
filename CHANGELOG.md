@@ -1,14 +1,12 @@
 ## 1.7.41
 
-- Prevented recovered career relics from being lost when a post-battle inventory, loot, or trade transaction commits an older roster snapshot.
-- Added a bounded global ownership audit covering every living hero's battle and civilian equipment, all mobile-party inventories, settlement inventories, settlement stashes, and settlement-party inventories before any recovery action.
-- Added **Repair missing recovered relics** to the existing TOR Career Uniques MCM page; it preserves existing owners, removes only the exact duplicate created by the faulty interim recovery build, and recreates a genuinely missing relic when its old runtime record no longer exists.
-- Removed the obsolete `torcu.repair_orphaned_relic_rewards` console command and its orphan-recovery entry point.
-- Fixed recycled TOR inventory rows retaining the magic-item background after being rebound to an ordinary item by restoring Bannerlord's current native row brush before TOR evaluates the active item.
-- Fixed TOR inventory magic-item detection for items carrying a separately rolled loot modifier, including Warden's Spear of the Wild Hunt, so they retain the purple background while unequipped.
-- Replaced TOR's unsafe weekly runtime-magic-item cleanup with a reference-safe pass that checks all live rosters and every living hero equipment slot before unregistering an item object.
-- Repairs already-affected runtime magic items on an item-icon cache miss by re-registering the still-referenced item before Bannerlord resolves its thumbnail.
-- Added no campaign-map polling or recurring global scans beyond TOR's existing weekly cleanup cadence.
+- Fixed TOR magic items with separately rolled loot modifiers, including Warden's Spear of the Wild Hunt, missing the purple magic-item background while unequipped.
+- Applied the inventory-row magic brush from the actual registered runtime item instead of TOR's broken combined item-and-modifier string classification.
+- Fixed recycled inventory rows retaining the purple magic-item background after being rebound to an ordinary item.
+- Prevented TOR's weekly magical-loot cleanup from unregistering runtime items that are still referenced by inventories, equipment, stashes, settlement storage, or pending loot.
+- Re-registered already-affected referenced runtime items before Bannerlord resolves a missing thumbnail, preventing TOR magic-item icons from disappearing permanently after cache eviction.
+- Prevented persistent encounter heroes from being captured through direct `TakePrisonerAction` paths and released encounter heroes already stuck in captivity so their normal recovery lifecycle can resume.
+- Added no campaign-map polling; cleanup ownership references are collected once per TOR weekly cleanup pass and queried in constant time for each candidate.
 
 ## 1.7.40
 
@@ -78,7 +76,7 @@
 
 - Added full individual-piece and 2/5–5/5 set-bonus activation for ordinary player-clan companions and other living player-clan heroes.
 - Evaluates every hero independently so pieces equipped by different characters can never combine into a false set tier.
-- Added owner-aware set tooltips for set pieces equipped by companions while retaining the controlled hero as the fallback for unequipped inventory items.
+- Added owner-aware set-tooltips for set pieces equipped by companions while retaining the controlled hero as the fallback for unequipped inventory items.
 - Excludes persistent encounter-hero equipment whose intrinsic and tier traits were already baked into its generated wargear, preventing duplicate bonuses after recruitment.
 - Keeps mastery, recognition, and encounter-hero recruitment checks tied to the currently controlled hero.
 - Uses only campaign-session, inventory-entry, equipment-mutation, and companion-roster events; no campaign-map tick scans or equipment fingerprint polling were added.
@@ -103,7 +101,7 @@
 
 - Added the first bounded culture/role catalogue fallback when matched TOR archetype outfits could not produce a complete, slot-valid loadout within the applicable armour-weight limit.
 - Applied the shared fallback to every encounter career rather than adding a Grey Lord-only item override.
-- Added exact-slot visual-base validation for the Grey Lord's `Cowl of Unremembered Faces` failure path.
+- Added exact-slot visual-base validation for the Grey Lord's `Cowl cof Unremembered Faces` failure path.
 - Preserved the 11-weight caster cap, culture/role filtering, exact-slot checks, and native equipment validation.
 - Rebuilt the repository from the canonical v1.7.28 source and removed historical validation reports, investigations, emergency binary-patch scripts, and transport artefacts.
 

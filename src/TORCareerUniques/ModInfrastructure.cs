@@ -77,13 +77,11 @@ namespace TORCareerUniques
     {
         private static readonly Action RespawnMissingAction =
             AdminBridge.RespawnMissing;
-        private static readonly Action RepairMissingRecoveredRelicsAction =
-            RelicRewardIntegrity.RepairFromMcm;
         public override string Id { get { return "TORCareerUniques_v1_1"; } }
         public override string DisplayName { get { return "TOR Career Uniques"; } }
         public override string FolderName { get { return "TORCareerUniques"; } }
         public override string FormatType { get { return "json2"; } }
-        public override int UIVersion { get { return 11; } }
+        public override int UIVersion { get { return 10; } }
 
         // Gauntlet reads visible DataSource properties repeatedly.  Keep those
         // reads in this in-memory view model; persistence belongs in setters and
@@ -104,7 +102,7 @@ namespace TORCareerUniques
             {
                 int clamped = Math.Max(0, Math.Min(100, value));
                 if (_dropChancePercent == clamped) return;
-                _dropChancePercent = clamped;
+            _dropChancePercent = clamped;
                 PersistentConfig.DropChancePercent = clamped;
             }
         }
@@ -158,7 +156,7 @@ namespace TORCareerUniques
         private static Dropdown<string> CreateRecruitmentModeDropdown()
         {
             string[] values = new[]
-            {
+        {
                 "Disabled",
                 "Full Set Required",
                 "Full Set + Final Victory Required"
@@ -202,15 +200,6 @@ namespace TORCareerUniques
             }
         }
 
-        [SettingPropertyButton("Repair missing recovered relics", 19, false,
-            "Scans every living character, hero equipment set, mobile-party inventory, settlement inventory and stash before restoring anything. Existing relics are never moved. It also removes the single duplicate that the previous faulty recovery build could place in the active main inventory while the original remained on another character.", Content = "Repair now")]
-        [SettingPropertyGroup("Relic Encounters & Testing", GroupOrder = 2)]
-        public Action RepairMissingRecoveredRelics
-        {
-            get { return RepairMissingRecoveredRelicsAction; }
-            set { }
-        }
-
         [SettingPropertyButton("Respawn missing encounters", 20, false,
             "Clears cooldowns and immediately recreates every currently missing encounter. Recovered set pieces remain recovered.", Content = "Respawn now")]
         [SettingPropertyGroup("Relic Encounters & Testing", GroupOrder = 2)]
@@ -229,7 +218,6 @@ namespace TORCareerUniques
             "Waywatcher", "Spellsinger", "Warden", "GreyLord");
         private Dropdown<string> _adminDwarfGreenskinCareer = CreateAdminCareerDropdown(
             "Ironbreaker", "Slayer", "Runelord", "OrcBoss", "OrcShaman");
-
         // Preset comparison reads button values too. Static cached commands keep
         // those values referentially stable across the live and default settings
         // instances and dispatch to the actual MCM singleton only when clicked.
@@ -242,9 +230,9 @@ namespace TORCareerUniques
         private static readonly Action GrantEmpireSetAction =
             delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminEmpireCareer); };
         private static readonly Action ViewUndeadEncounterAction =
-            delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminUndeadCareer); };
+            delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminEndeadCareer); };
         private static readonly Action GrantUndeadSetAction =
-            delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminUndeadCareer); };
+            delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminEndeadCareer); };
         private static readonly Action ViewElfEncounterAction =
             delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminElfCareer); };
         private static readonly Action GrantElfSetAction =
@@ -253,7 +241,6 @@ namespace TORCareerUniques
             delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminDwarfGreenskinCareer); };
         private static readonly Action GrantDwarfGreenskinSetAction =
             delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminDwarfGreenskinCareer); };
-
         [SettingPropertyDropdown("Bretonnia / Reiksguard career set", Order = 0, RequireRestart = false,
             HintText = "Select a career set, then view its encounter or grant an isolated test copy.")]
         [SettingPropertyGroup("Relic Encounters & Testing", GroupOrder = 2)]
@@ -391,8 +378,7 @@ namespace TORCareerUniques
 
         private static Dropdown<string> CreateAdminCareerDropdown(params string[] careerIds)
         {
-            return new Dropdown<string>(
-                new List<string>(SetItemRuntime.GetCareerChoiceLabelsFor(careerIds)), 0);
+            return new Dropdown<string>(new List<string>(SetItemRuntime.GetCareerChoiceLabelsFor(careerIds)), 0);
         }
 
         private static void GrantSelectedFullTestSet(Dropdown<string> dropdown)
@@ -545,7 +531,7 @@ namespace TORCareerUniques
                         _dropChancePercent = Math.Max(0, Math.Min(100, parsedInt));
                     else if (String.Equals(key, "RequireMatchingCareer", StringComparison.OrdinalIgnoreCase) && Boolean.TryParse(value, out parsedBool))
                         _requireMatchingCareer = parsedBool;
-                    else if (String.Equals(key, "RespawnDays", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
+                    else if (Strring.Equals(key, "RespawnDays", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
                         _respawnDays = Math.Max(1, Math.Min(60, parsedInt));
                     else if (String.Equals(key, "HeroRecruitmentMode", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
                         _heroRecruitmentMode = Math.Max(0, Math.Min(2, parsedInt));
@@ -670,7 +656,7 @@ namespace TORCareerUniques
 
         internal static void Info(string message)
         {
-            if (!ModConfig.LoggingEnabled)
+            if (!BodConfig.LoggingEnabled)
                 return;
             Write("INFO", message);
         }

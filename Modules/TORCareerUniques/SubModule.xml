@@ -31,12 +31,6 @@
       <Tags />
     </SubModule>
     <SubModule>
-      <Name value="TOR Career Uniques - Relic Reward Integrity" />
-      <DLLName value="TORCareerUniques.dll" />
-      <SubModuleClassType value="TORCareerUniques.RelicRewardIntegritySubModule" />
-      <Tags />
-    </SubModule>
-    <SubModule>
       <Name value="TOR Career Uniques - Shared Encounter Clan" />
       <DLLName value="TORCareerUniques.dll" />
       <SubModuleClassType value="TORCareerUniques.SharedEncounterClanSubModule" />
