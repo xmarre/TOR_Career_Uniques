@@ -23,6 +23,7 @@ jobs:
           CLEAN_MAIN: 67ee22eaec9346cedffb994805d932a692dbc4c7
         run: |
           set -euo pipefail
+          echo "Running finalized v1.7.41 cleanup pass"
           python - <<'PY'
           from pathlib import Path
           import re
