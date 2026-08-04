@@ -230,9 +230,9 @@ namespace TORCareerUniques
         private static readonly Action GrantEmpireSetAction =
             delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminEmpireCareer); };
         private static readonly Action ViewUndeadEncounterAction =
-            delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminEndeadCareer); };
+            delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminUndeadCareer); };
         private static readonly Action GrantUndeadSetAction =
-            delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminEndeadCareer); };
+            delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminUndeadCareer); };
         private static readonly Action ViewElfEncounterAction =
             delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminElfCareer); };
         private static readonly Action GrantElfSetAction =
@@ -531,7 +531,7 @@ namespace TORCareerUniques
                         _dropChancePercent = Math.Max(0, Math.Min(100, parsedInt));
                     else if (String.Equals(key, "RequireMatchingCareer", StringComparison.OrdinalIgnoreCase) && Boolean.TryParse(value, out parsedBool))
                         _requireMatchingCareer = parsedBool;
-                    else if (Strring.Equals(key, "RespawnDays", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
+                    else if (String.Equals(key, "RespawnDays", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
                         _respawnDays = Math.Max(1, Math.Min(60, parsedInt));
                     else if (String.Equals(key, "HeroRecruitmentMode", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedInt))
                         _heroRecruitmentMode = Math.Max(0, Math.Min(2, parsedInt));
@@ -656,7 +656,7 @@ namespace TORCareerUniques
 
         internal static void Info(string message)
         {
-            if (!BodConfig.LoggingEnabled)
+            if (!ModConfig.LoggingEnabled)
                 return;
             Write("INFO", message);
         }
