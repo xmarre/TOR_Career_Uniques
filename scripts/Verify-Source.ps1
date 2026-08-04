@@ -39,12 +39,15 @@ if ($missingFromManifest.Count -gt 0 -or $missingFromTree.Count -gt 0) {
     throw 'Source manifest file set mismatch.'
 }
 
+$hashMismatch = $false
 foreach ($relative in $expected.Keys) {
     $path = Join-Path $repoRoot $relative
     $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $expected[$relative]) {
-        throw "SHA-256 mismatch for $relative. Expected $($expected[$relative]), got $actual."
+        Write-Host "ACTUAL_HASH $actual  $relative"
+        $hashMismatch = $true
     }
 }
+if ($hashMismatch) { throw 'Source manifest hash mismatch.' }
 
 Write-Host "Verified $($expected.Count) repository files against SOURCE_MANIFEST.sha256."
