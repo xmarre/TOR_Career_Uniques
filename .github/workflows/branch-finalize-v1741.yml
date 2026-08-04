@@ -1,16 +1,15 @@
 name: Branch finalize v1.7.41
 
 on:
-  push:
-    branches: [fix/multichar-relic-recovery-v2]
-    paths:
-      - .github/workflows/branch-finalize-v1741.yml
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/multichar-relic-recovery-v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -23,7 +22,6 @@ jobs:
           CLEAN_MAIN: 67ee22eaec9346cedffb994805d932a692dbc4c7
         run: |
           set -euo pipefail
-          echo "Running finalized v1.7.41 cleanup pass"
           python - <<'PY'
           from pathlib import Path
           import re
