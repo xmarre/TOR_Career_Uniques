@@ -3,14 +3,17 @@ using System.Collections.Generic;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.Party;
 
 namespace TORCareerUniques
 {
     internal static class EncounterHeroDeathGuard
     {
-        private const string HarmonyId = "torcareeruniques.encounterheroes.deathguard";
+        private const string HarmonyId = "torcareeruniques.encounterheroes.lifecycleguard";
         private static readonly object Gate = new object();
         private static readonly HashSet<Hero> ProtectedHeroes =
+            new HashSet<Hero>(ReferenceComparer.Instance);
+        private static readonly HashSet<Hero> ReportedCaptureBlocks =
             new HashSet<Hero>(ReferenceComparer.Instance);
         private static bool _initialized;
         private static bool _loggedHarmonyWait;
@@ -30,23 +33,32 @@ namespace TORCareerUniques
                     if (!_loggedHarmonyWait)
                     {
                         _loggedHarmonyWait = true;
-                        ModLog.Error("Encounter-hero forced-death guard is waiting for HarmonyLib from 0Harmony.");
+                        ModLog.Error("Encounter-hero lifecycle guard is waiting for HarmonyLib from 0Harmony.");
                     }
                     return;
                 }
 
-                MethodInfo original = FindKillInternal();
-                MethodInfo prefix = typeof(EncounterHeroDeathGuard).GetMethod(
+                MethodInfo killOriginal = FindKillInternal();
+                MethodInfo killPrefix = typeof(EncounterHeroDeathGuard).GetMethod(
                     "PreventForcedDeath", BindingFlags.NonPublic | BindingFlags.Static);
-                if (original == null || prefix == null)
+                if (killOriginal == null || killPrefix == null)
                     throw new MissingMethodException(typeof(KillCharacterAction).FullName,
                         "ApplyInternal(Hero, Hero, KillCharacterActionDetail, bool, bool)");
 
+                MethodInfo captureOriginal = FindTakePrisonerInternal();
+                MethodInfo capturePrefix = typeof(EncounterHeroDeathGuard).GetMethod(
+                    "PreventForcedCaptivity", BindingFlags.NonPublic | BindingFlags.Static);
+                if (captureOriginal == null || capturePrefix == null)
+                    throw new MissingMethodException(typeof(TakePrisonerAction).FullName,
+                        "ApplyInternal(PartyBase, Hero, bool)");
+
                 _harmony = Activator.CreateInstance(harmonyType,
                     new object[] { HarmonyId });
-                ApplyPatch(harmonyType, harmonyMethodType, original, prefix);
+                ApplyPatch(harmonyType, harmonyMethodType, killOriginal, killPrefix);
+                ApplyPatch(harmonyType, harmonyMethodType, captureOriginal,
+                    capturePrefix);
                 _initialized = true;
-                ModLog.Info("Installed encounter-hero forced-death guard on KillCharacterAction.ApplyInternal.");
+                ModLog.Info("Installed encounter-hero forced-death and final-action captivity guards.");
             }
         }
 
@@ -65,34 +77,46 @@ namespace TORCareerUniques
             if (hero == null)
                 return;
             lock (Gate)
+            {
                 ProtectedHeroes.Remove(hero);
+                ReportedCaptureBlocks.Remove(hero);
+            }
         }
 
         internal static void ClearAndRegister(IEnumerable<Hero> heroes)
         {
             if (!_initialized)
                 Initialize();
+
+            List<Hero> snapshot = new List<Hero>();
             lock (Gate)
             {
                 ProtectedHeroes.Clear();
-                if (heroes == null)
-                    return;
-                foreach (Hero hero in heroes)
-                    if (hero != null)
-                        ProtectedHeroes.Add(hero);
+                ReportedCaptureBlocks.Clear();
+                if (heroes != null)
+                {
+                    foreach (Hero hero in heroes)
+                    {
+                        if (hero == null || !ProtectedHeroes.Add(hero))
+                            continue;
+                        snapshot.Add(hero);
+                    }
+                }
             }
+
+            // Existing saves can already contain a captive encounter leader from
+            // TakePrisonerAction paths that never consult CanHeroBecomePrisonerEvent.
+            // Release only heroes registered by the owning encounter behavior. The
+            // normal HeroPrisonerReleased listener then performs the established
+            // recovery/cooldown transition and removes the stale prisoner-roster row.
+            for (int i = 0; i < snapshot.Count; i++)
+                ReleaseInvalidExistingCaptivity(snapshot[i]);
         }
 
         private static bool PreventForcedDeath(Hero __0)
         {
             Hero victim = __0;
-            if (victim == null)
-                return true;
-
-            bool protectedHero;
-            lock (Gate)
-                protectedHero = ProtectedHeroes.Contains(victim);
-            if (!protectedHero)
+            if (victim == null || !IsProtected(victim))
                 return true;
 
             try
@@ -110,6 +134,64 @@ namespace TORCareerUniques
             return false;
         }
 
+        // TakePrisonerAction.ApplyInternal is the authoritative mutation boundary.
+        // Bannerlord settlement capture and several direct action paths reach it
+        // without raising CanHeroBecomePrisonerEvent, so the campaign-event veto is
+        // insufficient on its own.
+        private static bool PreventForcedCaptivity(PartyBase __0, Hero __1)
+        {
+            Hero prisoner = __1;
+            if (prisoner == null || !IsProtected(prisoner))
+                return true;
+
+            bool shouldLog;
+            lock (Gate)
+                shouldLog = ReportedCaptureBlocks.Add(prisoner);
+            if (shouldLog)
+            {
+                string captor = __0 == null || __0.Name == null
+                    ? "an unknown party"
+                    : __0.Name.ToString();
+                ModLog.Info("Blocked TakePrisonerAction for persistent encounter hero " +
+                    prisoner.Name + " by " + captor +
+                    ". Encounter leaders use the normal defeat/recovery lifecycle.");
+            }
+            return false;
+        }
+
+        private static void ReleaseInvalidExistingCaptivity(Hero hero)
+        {
+            if (hero == null ||
+                (!hero.IsPrisoner && hero.PartyBelongedToAsPrisoner == null))
+                return;
+
+            try
+            {
+                string captor = hero.PartyBelongedToAsPrisoner == null ||
+                    hero.PartyBelongedToAsPrisoner.Name == null
+                    ? "an unknown party"
+                    : hero.PartyBelongedToAsPrisoner.Name.ToString();
+                EndCaptivityAction.ApplyByEscape(hero, null, false);
+                if (hero.IsPrisoner || hero.PartyBelongedToAsPrisoner != null)
+                    throw new InvalidOperationException(
+                        "EndCaptivityAction did not clear the prisoner state.");
+                ModLog.Info("Released stale captive encounter hero " + hero.Name +
+                    " from " + captor +
+                    "; normal encounter recovery and respawn scheduling resumed.");
+            }
+            catch (Exception ex)
+            {
+                ModLog.Error("Could not release stale captive encounter hero " +
+                    hero.Name + ": " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        private static bool IsProtected(Hero hero)
+        {
+            lock (Gate)
+                return ProtectedHeroes.Contains(hero);
+        }
+
         private static MethodInfo FindKillInternal()
         {
             MethodInfo[] methods = typeof(KillCharacterAction).GetMethods(
@@ -124,6 +206,24 @@ namespace TORCareerUniques
                     parameters[1].ParameterType == typeof(Hero) &&
                     parameters[3].ParameterType == typeof(bool) &&
                     parameters[4].ParameterType == typeof(bool))
+                    return method;
+            }
+            return null;
+        }
+
+        private static MethodInfo FindTakePrisonerInternal()
+        {
+            MethodInfo[] methods = typeof(TakePrisonerAction).GetMethods(
+                BindingFlags.NonPublic | BindingFlags.Static);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo method = methods[i];
+                ParameterInfo[] parameters = method.GetParameters();
+                if (method.Name != "ApplyInternal" || parameters.Length != 3)
+                    continue;
+                if (parameters[0].ParameterType == typeof(PartyBase) &&
+                    parameters[1].ParameterType == typeof(Hero) &&
+                    parameters[2].ParameterType == typeof(bool))
                     return method;
             }
             return null;
@@ -219,7 +319,8 @@ namespace TORCareerUniques
             public bool Equals(Hero x, Hero y) { return Object.ReferenceEquals(x, y); }
             public int GetHashCode(Hero obj)
             {
-                return obj == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+                return obj == null ? 0 :
+                    System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
             }
         }
     }

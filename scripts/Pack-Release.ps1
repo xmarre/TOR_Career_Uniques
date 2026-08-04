@@ -67,6 +67,23 @@ $fullBin = Join-Path $fullRoot 'Modules/TORCareerUniques/bin/Win64_Shipping_Clie
 New-Item -ItemType Directory -Path $fullBin -Force | Out-Null
 Copy-Item -Path (Join-Path $cleanBin '*') -Destination $fullBin -Force
 
+# The full-source archive replaces the repository's tracked runtime binaries with
+# the binaries produced by this exact build. Regenerate the staged manifest after
+# that replacement so every hash describes the files actually shipped.
+$fullManifestPath = Join-Path $fullRoot 'SOURCE_MANIFEST.sha256'
+$fullManifestLines = Get-ChildItem -LiteralPath $fullRoot -File -Recurse -Force |
+    Where-Object { $_.FullName -ne $fullManifestPath } |
+    ForEach-Object {
+        $relative = [IO.Path]::GetRelativePath($fullRoot, $_.FullName).Replace('\', '/')
+        [PSCustomObject]@{
+            Relative = $relative
+            Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } |
+    Sort-Object -Property Relative |
+    ForEach-Object { "$($_.Hash)  $($_.Relative)" }
+$fullManifestLines | Set-Content -LiteralPath $fullManifestPath -Encoding ascii
+
 $cleanName = "TOR_Career_Uniques_v${Version}_Bannerlord_1.3.15_TOR_1.16_CLEAN.zip"
 $sourceName = "TOR_Career_Uniques_v${Version}_FULL_SOURCE_Bannerlord_1.3.15_TOR_1.16.zip"
 $cleanZip = Join-Path $release $cleanName

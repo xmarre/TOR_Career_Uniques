@@ -12,8 +12,8 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
-[assembly: AssemblyVersion("1.7.37.0")]
-[assembly: AssemblyFileVersion("1.7.37.0")]
+[assembly: AssemblyVersion("1.7.41.0")]
+[assembly: AssemblyFileVersion("1.7.41.0")]
 
 namespace TORCareerUniques
 {
@@ -22,6 +22,7 @@ namespace TORCareerUniques
         protected override void OnSubModuleLoad()
         {
             ModLog.Initialize();
+            TorMagicItemLifecycleFix.Initialize();
             EncounterHeroDeathGuard.Initialize();
             CareerUniqueRuntime.Initialize();
             SetItemRuntime.Initialize();
@@ -55,6 +56,7 @@ namespace TORCareerUniques
 
         protected override void OnBeforeInitialModuleScreenSetAsRoot()
         {
+            TorMagicItemLifecycleFix.ResetSession();
             RuntimePerformanceGate.ResetSession();
             EncounterAffinityRuntime.ResetSession();
             base.OnBeforeInitialModuleScreenSetAsRoot();
@@ -62,6 +64,7 @@ namespace TORCareerUniques
 
         protected override void OnSubModuleUnloaded()
         {
+            TorMagicItemLifecycleFix.ResetSession();
             RuntimePerformanceGate.ResetSession();
             EncounterAffinityRuntime.ResetSession();
             base.OnSubModuleUnloaded();
@@ -99,7 +102,7 @@ namespace TORCareerUniques
             {
                 int clamped = Math.Max(0, Math.Min(100, value));
                 if (_dropChancePercent == clamped) return;
-                _dropChancePercent = clamped;
+            _dropChancePercent = clamped;
                 PersistentConfig.DropChancePercent = clamped;
             }
         }
@@ -153,7 +156,7 @@ namespace TORCareerUniques
         private static Dropdown<string> CreateRecruitmentModeDropdown()
         {
             string[] values = new[]
-            {
+        {
                 "Disabled",
                 "Full Set Required",
                 "Full Set + Final Victory Required"
@@ -215,7 +218,6 @@ namespace TORCareerUniques
             "Waywatcher", "Spellsinger", "Warden", "GreyLord");
         private Dropdown<string> _adminDwarfGreenskinCareer = CreateAdminCareerDropdown(
             "Ironbreaker", "Slayer", "Runelord", "OrcBoss", "OrcShaman");
-
         // Preset comparison reads button values too. Static cached commands keep
         // those values referentially stable across the live and default settings
         // instances and dispatch to the actual MCM singleton only when clicked.
@@ -239,7 +241,6 @@ namespace TORCareerUniques
             delegate { ShowSelectedEncounter(Instance == null ? null : Instance._adminDwarfGreenskinCareer); };
         private static readonly Action GrantDwarfGreenskinSetAction =
             delegate { GrantSelectedFullTestSet(Instance == null ? null : Instance._adminDwarfGreenskinCareer); };
-
         [SettingPropertyDropdown("Bretonnia / Reiksguard career set", Order = 0, RequireRestart = false,
             HintText = "Select a career set, then view its encounter or grant an isolated test copy.")]
         [SettingPropertyGroup("Relic Encounters & Testing", GroupOrder = 2)]
@@ -377,8 +378,7 @@ namespace TORCareerUniques
 
         private static Dropdown<string> CreateAdminCareerDropdown(params string[] careerIds)
         {
-            return new Dropdown<string>(
-                new List<string>(SetItemRuntime.GetCareerChoiceLabelsFor(careerIds)), 0);
+            return new Dropdown<string>(new List<string>(SetItemRuntime.GetCareerChoiceLabelsFor(careerIds)), 0);
         }
 
         private static void GrantSelectedFullTestSet(Dropdown<string> dropdown)
