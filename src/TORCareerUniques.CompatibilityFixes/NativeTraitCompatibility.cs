@@ -2,22 +2,24 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
+using System.Threading;
 using HarmonyLib;
 using TaleWorlds.MountAndBlade;
 
 namespace TORCareerUniques.CompatibilityFixes
 {
     /// <summary>
-    /// Keeps TORCU's native-trait references compatible with TOR releases that retain
-    /// a trait's display identity while changing its StringId. It also prevents one
-    /// unresolved native trait from blocking registry initialization for every career.
+    /// Keeps a missing native TOR item trait scoped to the item/career that needs it.
+    /// TORCU's trait-registration routines otherwise treat every native trait across all
+    /// careers as one global readiness invariant, so one stale TOR data entry prevents
+    /// every encounter and admin grant from initializing.
     /// </summary>
     public sealed class NativeTraitCompatibilitySubModule : MBSubModuleBase
     {
         private const string HarmonyId =
-            "torcareeruniques.compatibilityfixes.native-traits.1";
-        private static readonly HashSet<string> Logged =
+            "torcareeruniques.compatibilityfixes.native-trait-isolation.1";
+        private static readonly object RegistrationLock = new object();
+        private static readonly HashSet<string> LoggedMissingTraits =
             new HashSet<string>(StringComparer.Ordinal);
         private static bool _installed;
 
@@ -28,20 +30,16 @@ namespace TORCareerUniques.CompatibilityFixes
                 return;
 
             Harmony harmony = new Harmony(HarmonyId);
-            InstallEnsureTraitsPatch(harmony,
-                "TORCareerUniques.CareerUniqueRuntime");
-            InstallEnsureTraitsPatch(harmony,
-                "TORCareerUniques.SetItemRuntime");
+            PatchTraitRegistration(harmony, "TORCareerUniques.CareerUniqueRuntime");
+            PatchTraitRegistration(harmony, "TORCareerUniques.SetItemRuntime");
             _installed = true;
         }
 
-        private static void InstallEnsureTraitsPatch(
-            Harmony harmony,
-            string runtimeTypeName)
+        private static void PatchTraitRegistration(Harmony harmony, string typeName)
         {
-            Type runtimeType = AccessTools.TypeByName(runtimeTypeName);
+            Type runtimeType = AccessTools.TypeByName(typeName);
             if (runtimeType == null)
-                throw new TypeLoadException(runtimeTypeName + " was not found.");
+                throw new TypeLoadException(typeName + " was not found.");
 
             MethodInfo target = AccessTools.Method(
                 runtimeType, "EnsureTraitsInjected", Type.EmptyTypes);
@@ -49,28 +47,27 @@ namespace TORCareerUniques.CompatibilityFixes
                 throw new MissingMethodException(
                     runtimeType.FullName, "EnsureTraitsInjected()");
 
-            MethodInfo prefix = AccessTools.Method(
-                typeof(NativeTraitCompatibilitySubModule),
-                nameof(BeforeEnsureTraitsInjected));
-            MethodInfo postfix = AccessTools.Method(
-                typeof(NativeTraitCompatibilitySubModule),
-                nameof(AfterEnsureTraitsInjected));
-            MethodInfo finalizer = AccessTools.Method(
-                typeof(NativeTraitCompatibilitySubModule),
-                nameof(FinalizeEnsureTraitsInjected));
-
             harmony.Patch(
                 target,
-                prefix: new HarmonyMethod(prefix),
-                postfix: new HarmonyMethod(postfix),
-                finalizer: new HarmonyMethod(finalizer));
+                prefix: new HarmonyMethod(
+                    typeof(NativeTraitCompatibilitySubModule),
+                    nameof(BeforeEnsureTraitsInjected)),
+                postfix: new HarmonyMethod(
+                    typeof(NativeTraitCompatibilitySubModule),
+                    nameof(AfterEnsureTraitsInjected)),
+                finalizer: new HarmonyMethod(
+                    typeof(NativeTraitCompatibilitySubModule),
+                    nameof(FinalizeEnsureTraitsInjected)));
         }
 
         private static void BeforeEnsureTraitsInjected(
             MethodBase __originalMethod,
-            out NativeTraitPatchState __state)
+            out TraitIsolationState __state)
         {
-            __state = new NativeTraitPatchState();
+            __state = new TraitIsolationState();
+            Monitor.Enter(RegistrationLock);
+            __state.LockHeld = true;
+
             try
             {
                 Type runtimeType = __originalMethod == null
@@ -79,12 +76,9 @@ namespace TORCareerUniques.CompatibilityFixes
                 if (runtimeType == null)
                     return;
 
-                IList registry;
-                HashSet<string> ids;
-                Dictionary<string, List<NativeTraitCandidate>> byName;
+                HashSet<string> registryIds;
                 string validationId;
-                if (!TryReadNativeRegistry(
-                    out registry, out ids, out byName, out validationId))
+                if (!TryReadLoadedTraitIds(out registryIds, out validationId))
                     return;
 
                 if (String.Equals(
@@ -92,94 +86,78 @@ namespace TORCareerUniques.CompatibilityFixes
                     "TORCareerUniques.CareerUniqueRuntime",
                     StringComparison.Ordinal))
                 {
-                    PrepareCareerNativeTraits(
-                        runtimeType, ids, byName, validationId, __state);
+                    IsolateMissingCareerTraits(
+                        runtimeType, registryIds, validationId, __state);
                 }
                 else if (String.Equals(
                     runtimeType.FullName,
                     "TORCareerUniques.SetItemRuntime",
                     StringComparison.Ordinal))
                 {
-                    PrepareSetNativeTraits(
-                        runtimeType, ids, byName, validationId, __state);
+                    IsolateMissingSetTraits(
+                        runtimeType, registryIds, validationId, __state);
                 }
             }
             catch (Exception ex)
             {
-                RestoreTemporaryIds(__state);
-                LogOnce(
-                    "native-trait-compat-prefix:" +
-                    (ex.GetType().FullName ?? ex.GetType().Name) + ":" +
-                    ex.Message,
-                    "Native TOR trait compatibility preparation failed: " +
-                    FormatException(ex),
-                    true);
+                Restore(__state);
+                LogCompatibilityFailure(ex);
             }
         }
 
-        private static void AfterEnsureTraitsInjected(
-            NativeTraitPatchState __state)
+        private static void AfterEnsureTraitsInjected(TraitIsolationState __state)
         {
-            RestoreTemporaryIds(__state);
+            Restore(__state);
         }
 
         private static Exception FinalizeEnsureTraitsInjected(
             Exception __exception,
-            NativeTraitPatchState __state)
+            TraitIsolationState __state)
         {
-            RestoreTemporaryIds(__state);
+            Restore(__state);
             return __exception;
         }
 
-        private static void PrepareCareerNativeTraits(
+        private static void IsolateMissingCareerTraits(
             Type runtimeType,
-            HashSet<string> ids,
-            Dictionary<string, List<NativeTraitCandidate>> byName,
+            HashSet<string> registryIds,
             string validationId,
-            NativeTraitPatchState state)
+            TraitIsolationState state)
         {
             Array definitions = GetStaticArray(runtimeType, "Definitions");
-            if (definitions == null)
+            if (definitions == null || String.IsNullOrEmpty(validationId))
                 return;
 
-            for (int d = 0; d < definitions.Length; d++)
+            for (int i = 0; i < definitions.Length; i++)
             {
-                object definition = definitions.GetValue(d);
-                if (definition == null)
-                    continue;
-
+                object definition = definitions.GetValue(i);
                 Array traits = GetArrayMember(definition, "Traits");
                 if (traits == null || traits.Length <= 3)
                     continue;
 
                 string careerId = GetStringMember(definition, "CareerId");
-                PrepareNativeSpec(
+                IsolateMissingNativeTrait(
                     traits.GetValue(3),
                     "career relic " + careerId,
-                    ids,
-                    byName,
+                    registryIds,
                     validationId,
                     state);
             }
         }
 
-        private static void PrepareSetNativeTraits(
+        private static void IsolateMissingSetTraits(
             Type runtimeType,
-            HashSet<string> ids,
-            Dictionary<string, List<NativeTraitCandidate>> byName,
+            HashSet<string> registryIds,
             string validationId,
-            NativeTraitPatchState state)
+            TraitIsolationState state)
         {
             Array definitions = GetStaticArray(runtimeType, "Definitions");
-            if (definitions == null)
+            if (definitions == null || String.IsNullOrEmpty(validationId))
                 return;
 
             for (int d = 0; d < definitions.Length; d++)
             {
                 object definition = definitions.GetValue(d);
-                if (definition == null)
-                    continue;
-
                 string careerId = GetStringMember(definition, "CareerId");
                 Array pieces = GetArrayMember(definition, "Pieces");
                 if (pieces == null)
@@ -187,131 +165,56 @@ namespace TORCareerUniques.CompatibilityFixes
 
                 for (int p = 0; p < pieces.Length; p++)
                 {
-                    object piece = pieces.GetValue(p);
-                    Array effects = GetArrayMember(piece, "Effects");
+                    Array effects = GetArrayMember(
+                        pieces.GetValue(p), "Effects");
                     if (effects == null || effects.Length <= 1)
                         continue;
 
-                    PrepareNativeSpec(
+                    IsolateMissingNativeTrait(
                         effects.GetValue(1),
                         careerId + " set piece " + (p + 1),
-                        ids,
-                        byName,
+                        registryIds,
                         validationId,
                         state);
                 }
             }
         }
 
-        private static void PrepareNativeSpec(
+        private static void IsolateMissingNativeTrait(
             object spec,
             string context,
-            HashSet<string> ids,
-            Dictionary<string, List<NativeTraitCandidate>> byName,
+            HashSet<string> registryIds,
             string validationId,
-            NativeTraitPatchState state)
+            TraitIsolationState state)
         {
             if (spec == null)
                 return;
 
             string configuredId = GetStringMember(spec, "Id");
             if (String.IsNullOrWhiteSpace(configuredId) ||
-                ids.Contains(configuredId))
+                registryIds.Contains(configuredId))
                 return;
 
-            string name = GetStringMember(spec, "Name");
-            string description = GetStringMember(spec, "Description");
-            string resolvedId = ResolveCurrentNativeId(
-                name, description, byName);
-
-            if (!String.IsNullOrEmpty(resolvedId))
-            {
-                if (!SetStringMember(spec, "Id", resolvedId))
-                    return;
-
-                ids.Add(resolvedId);
-                LogOnce(
-                    "native-trait-rebind:" + configuredId + "->" + resolvedId,
-                    "Rebound stale native TOR trait id '" + configuredId +
-                    "' to '" + resolvedId + "' by loaded trait identity (" +
-                    context + ", " + name + ").",
-                    false);
-                return;
-            }
-
-            // EnsureTraitsInjected currently treats every native reference across all
-            // 22 careers as one global readiness invariant. If TOR genuinely removed a
-            // trait, that makes one unrelated item disable every encounter and admin
-            // grant. Substitute an existing registry id only while the readiness scan
-            // runs, then restore the unresolved id immediately. The placeholder is
-            // never inserted into TOR's registry and can never be attached to an item.
-            if (String.IsNullOrEmpty(validationId))
-                return;
-
-            state.TemporaryIds.Add(
-                new TemporaryId(spec, configuredId, validationId));
+            // The original EnsureTraitsInjected methods only test membership for
+            // native-trait slots, then immediately continue. Give that membership
+            // check an existing registry id for the duration of this synchronous
+            // call and restore the real configured id before any item can use it.
+            // This permits TORCU-owned traits to finish registering without ever
+            // attaching a substitute native effect to an item.
+            TemporaryId temporary =
+                new TemporaryId(spec, configuredId, validationId);
             if (!SetStringMember(spec, "Id", validationId))
-            {
-                state.TemporaryIds.RemoveAt(state.TemporaryIds.Count - 1);
                 return;
-            }
 
-            LogOnce(
-                "native-trait-isolated:" + configuredId,
-                "Native TOR trait '" + configuredId + "' (" + name +
-                ") is not present in the loaded registry. Registry initialization " +
-                "will continue so unrelated careers remain usable; the affected " +
-                "item keeps its original unresolved trait id and will fail locally " +
-                "instead of disabling all TORCU encounters (" + context + ").",
-                true);
+            state.TemporaryIds.Add(temporary);
+            LogMissingTraitOnce(configuredId, context);
         }
 
-        private static string ResolveCurrentNativeId(
-            string configuredName,
-            string configuredDescription,
-            Dictionary<string, List<NativeTraitCandidate>> byName)
-        {
-            string nameKey = NormalizeIdentity(configuredName);
-            if (String.IsNullOrEmpty(nameKey))
-                return null;
-
-            List<NativeTraitCandidate> candidates;
-            if (!byName.TryGetValue(nameKey, out candidates) ||
-                candidates == null || candidates.Count == 0)
-                return null;
-
-            if (candidates.Count == 1)
-                return candidates[0].Id;
-
-            string descriptionKey = NormalizeIdentity(configuredDescription);
-            if (String.IsNullOrEmpty(descriptionKey))
-                return null;
-
-            NativeTraitCandidate match = null;
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                if (!String.Equals(
-                    candidates[i].DescriptionKey,
-                    descriptionKey,
-                    StringComparison.Ordinal))
-                    continue;
-                if (match != null)
-                    return null;
-                match = candidates[i];
-            }
-            return match == null ? null : match.Id;
-        }
-
-        private static bool TryReadNativeRegistry(
-            out IList registry,
+        private static bool TryReadLoadedTraitIds(
             out HashSet<string> ids,
-            out Dictionary<string, List<NativeTraitCandidate>> byName,
             out string validationId)
         {
-            registry = null;
             ids = new HashSet<string>(StringComparer.Ordinal);
-            byName = new Dictionary<string, List<NativeTraitCandidate>>(
-                StringComparer.Ordinal);
             validationId = null;
 
             Type managerType = AccessTools.TypeByName(
@@ -325,68 +228,113 @@ namespace TORCareerUniques.CompatibilityFixes
 
             MethodInfo getTraits = AccessTools.Method(
                 managerType, "GetItemTraits", Type.EmptyTypes);
-            if (getTraits == null)
+            IList traits = getTraits == null
+                ? null
+                : getTraits.Invoke(manager, null) as IList;
+            if (traits == null || traits.Count == 0)
                 return false;
 
-            registry = getTraits.Invoke(manager, null) as IList;
-            if (registry == null || registry.Count == 0)
-                return false;
-
-            for (int i = 0; i < registry.Count; i++)
+            for (int i = 0; i < traits.Count; i++)
             {
-                object trait = registry[i];
-                if (trait == null)
-                    continue;
-
-                string id = GetStringMember(trait, "ItemTraitStringId");
+                string id = GetStringMember(
+                    traits[i], "ItemTraitStringId");
                 if (String.IsNullOrWhiteSpace(id))
                     continue;
 
                 ids.Add(id);
-                bool torcuTrait = id.StartsWith(
-                    "torcu_", StringComparison.Ordinal);
-                if (!torcuTrait && validationId == null)
+                if (validationId == null &&
+                    !id.StartsWith("torcu_", StringComparison.Ordinal))
                     validationId = id;
-                if (torcuTrait)
-                    continue;
-
-                string nameKey = NormalizeIdentity(
-                    GetStringMember(trait, "ItemTraitName"));
-                if (String.IsNullOrEmpty(nameKey))
-                    continue;
-
-                List<NativeTraitCandidate> candidates;
-                if (!byName.TryGetValue(nameKey, out candidates))
-                {
-                    candidates = new List<NativeTraitCandidate>();
-                    byName.Add(nameKey, candidates);
-                }
-                candidates.Add(new NativeTraitCandidate
-                {
-                    Id = id,
-                    DescriptionKey = NormalizeIdentity(
-                        GetStringMember(trait, "ItemTraitDescription"))
-                });
             }
 
-            return true;
+            return validationId != null;
         }
 
-        private static void RestoreTemporaryIds(NativeTraitPatchState state)
+        private static void Restore(TraitIsolationState state)
         {
             if (state == null || state.Restored)
                 return;
 
             state.Restored = true;
-            for (int i = state.TemporaryIds.Count - 1; i >= 0; i--)
+            try
             {
-                TemporaryId entry = state.TemporaryIds[i];
-                string current = GetStringMember(entry.Spec, "Id");
-                if (String.Equals(
-                    current, entry.ValidationId, StringComparison.Ordinal))
-                    SetStringMember(entry.Spec, "Id", entry.OriginalId);
+                for (int i = state.TemporaryIds.Count - 1; i >= 0; i--)
+                {
+                    TemporaryId entry = state.TemporaryIds[i];
+                    string currentId = GetStringMember(entry.Spec, "Id");
+                    if (String.Equals(
+                        currentId,
+                        entry.ValidationId,
+                        StringComparison.Ordinal))
+                    {
+                        SetStringMember(
+                            entry.Spec, "Id", entry.OriginalId);
+                    }
+                }
+                state.TemporaryIds.Clear();
             }
-            state.TemporaryIds.Clear();
+            finally
+            {
+                if (state.LockHeld)
+                {
+                    state.LockHeld = false;
+                    Monitor.Exit(RegistrationLock);
+                }
+            }
+        }
+
+        private static void LogCompatibilityFailure(Exception ex)
+        {
+            try
+            {
+                Type logType = AccessTools.TypeByName("TORCareerUniques.ModLog");
+                MethodInfo logError = AccessTools.Method(
+                    logType, "Error", new[] { typeof(string) });
+                if (logError != null)
+                {
+                    logError.Invoke(null, new object[]
+                    {
+                        "Native-trait isolation guard failed; TORCU will use its " +
+                        "original registry-readiness behavior for this call: " +
+                        ex.GetType().FullName + ": " + ex.Message
+                    });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void LogMissingTraitOnce(
+            string traitId,
+            string context)
+        {
+            lock (LoggedMissingTraits)
+            {
+                if (!LoggedMissingTraits.Add(traitId))
+                    return;
+            }
+
+            string message =
+                "Required native TOR trait is absent from the loaded registry: " +
+                traitId + " (" + context + "). TORCU will keep this failure " +
+                "local to items that require that trait instead of disabling all " +
+                "career encounters. Current TOR/WiTM data should contain TORCU's " +
+                "mapped native traits; verify that TOR_Core ModuleData matches the " +
+                "installed TOR version.";
+
+            try
+            {
+                Type logType = AccessTools.TypeByName("TORCareerUniques.ModLog");
+                MethodInfo logError = AccessTools.Method(
+                    logType, "Error", new[] { typeof(string) });
+                if (logError != null)
+                    logError.Invoke(null, new object[] { message });
+            }
+            catch
+            {
+                // Diagnostics must not affect registry initialization.
+            }
         }
 
         private static Array GetStaticArray(Type type, string name)
@@ -397,8 +345,7 @@ namespace TORCareerUniques.CompatibilityFixes
 
         private static Array GetArrayMember(object instance, string name)
         {
-            object value = GetMember(instance, name);
-            return value as Array;
+            return GetMember(instance, name) as Array;
         }
 
         private static object GetStaticMember(Type type, string name)
@@ -407,7 +354,10 @@ namespace TORCareerUniques.CompatibilityFixes
                 return null;
 
             PropertyInfo property = AccessTools.Property(type, name);
-            if (property != null && property.GetGetMethod(true) != null)
+            MethodInfo getter = property == null
+                ? null
+                : property.GetGetMethod(true);
+            if (getter != null)
                 return property.GetValue(null, null);
 
             FieldInfo field = AccessTools.Field(type, name);
@@ -421,7 +371,10 @@ namespace TORCareerUniques.CompatibilityFixes
 
             Type type = instance.GetType();
             PropertyInfo property = AccessTools.Property(type, name);
-            if (property != null && property.GetGetMethod(true) != null)
+            MethodInfo getter = property == null
+                ? null
+                : property.GetGetMethod(true);
+            if (getter != null)
                 return property.GetValue(instance, null);
 
             FieldInfo field = AccessTools.Field(type, name);
@@ -435,7 +388,9 @@ namespace TORCareerUniques.CompatibilityFixes
         }
 
         private static bool SetStringMember(
-            object instance, string name, string value)
+            object instance,
+            string name,
+            string value)
         {
             if (instance == null)
                 return false;
@@ -457,79 +412,45 @@ namespace TORCareerUniques.CompatibilityFixes
                 setter.Invoke(instance, new object[] { value });
                 return true;
             }
+
             return false;
         }
 
-        private static string NormalizeIdentity(string value)
+        private sealed class TraitIsolationState
         {
-            if (String.IsNullOrWhiteSpace(value))
-                return String.Empty;
-
-            StringBuilder result = new StringBuilder(value.Length);
-            for (int i = 0; i < value.Length; i++)
-            {
-                char c = value[i];
-                if (Char.IsLetterOrDigit(c))
-                    result.Append(Char.ToLowerInvariant(c));
-            }
-            return result.ToString();
-        }
-
-        private static void LogOnce(
-            string key, string message, bool error)
-        {
-            if (!Logged.Add(key))
-                return;
-
-            try
-            {
-                Type logType = AccessTools.TypeByName("TORCareerUniques.ModLog");
-                MethodInfo method = AccessTools.Method(
-                    logType, error ? "Error" : "Info",
-                    new[] { typeof(string) });
-                if (method != null)
-                    method.Invoke(null, new object[] { message });
-            }
-            catch
-            {
-                // Compatibility logging must never affect game state.
-            }
-        }
-
-        private static string FormatException(Exception ex)
-        {
-            TargetInvocationException invocation = ex as TargetInvocationException;
-            if (invocation != null && invocation.InnerException != null)
-                ex = invocation.InnerException;
-            return ex.GetType().FullName + ": " + ex.Message;
-        }
-
-        private sealed class NativeTraitPatchState
-        {
-            internal readonly List<TemporaryId> TemporaryIds =
+            private readonly List<TemporaryId> _temporaryIds =
                 new List<TemporaryId>();
-            internal bool Restored;
+            private bool _lockHeld;
+            private bool _restored;
+
+            internal List<TemporaryId> TemporaryIds { get { return _temporaryIds; } }
+            internal bool LockHeld
+            {
+                get { return _lockHeld; }
+                set { _lockHeld = value; }
+            }
+            internal bool Restored
+            {
+                get { return _restored; }
+                set { _restored = value; }
+            }
         }
 
         private sealed class TemporaryId
         {
-            internal readonly object Spec;
-            internal readonly string OriginalId;
-            internal readonly string ValidationId;
-
             internal TemporaryId(
-                object spec, string originalId, string validationId)
+                object spec,
+                string originalId,
+                string validationId)
             {
                 Spec = spec;
                 OriginalId = originalId;
                 ValidationId = validationId;
             }
-        }
 
-        private sealed class NativeTraitCandidate
-        {
-            internal string Id;
-            internal string DescriptionKey;
+            internal object Spec { get; private set; }
+            internal string OriginalId { get; private set; }
+            internal string ValidationId { get; private set; }
         }
     }
 }
