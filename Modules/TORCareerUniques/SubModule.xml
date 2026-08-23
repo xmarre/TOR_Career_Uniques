@@ -73,6 +73,12 @@
       <Tags />
     </SubModule>
     <SubModule>
+      <Name value="TOR Career Uniques - Native Trait Compatibility" />
+      <DLLName value="TORCareerUniques.CompatibilityFixes.dll" />
+      <SubModuleClassType value="TORCareerUniques.CompatibilityFixes.NativeTraitCompatibilitySubModule" />
+      <Tags />
+    </SubModule>
+    <SubModule>
       <Name value="TOR Career Uniques - Tavern Rumors" />
       <DLLName value="TORCareerUniques.TavernRumors.dll" />
       <SubModuleClassType value="TORCareerUniques.TavernRumors.TavernRumorSubModule" />
