@@ -2,7 +2,7 @@
 <Module>
   <Name value="TOR Career Uniques" />
   <Id value="TORCareerUniques" />
-    <Version value="v1.7.41" />
+    <Version value="v1.7.42" />
   <DefaultModule value="false" />
   <SingleplayerModule value="true" />
   <Official value="false" />
