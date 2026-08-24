@@ -1,3 +1,13 @@
+## 1.7.42
+
+- Fixed a missing or TOR-filtered native item trait causing the shared TORCU trait-registration readiness check to fail globally and block unrelated encounter heroes, defender parties, respawns, and admin set grants.
+- Scoped missing native TOR dependencies to the item or career that actually requires them, restoring unaffected careers such as Runelord and Warrior Priest when another career's TOR trait is unavailable.
+- Kept TOR's native trait registry authoritative: no fabricated traits, name-based remapping, aliases, or approximated effects are registered or persisted.
+- Temporarily substitutes an already-loaded registry id only during TORCU's membership-only native-trait validation, then restores every configured id before any item creation path can consume it.
+- Serialized the bounded validation mutation window and restores state from both postfix and finalizer paths so concurrent/re-entrant registration cannot observe partially restored definitions.
+- Added a once-per-trait diagnostic that points to stale or mismatched `TOR_Core` ModuleData when a native trait expected by current TOR/WiTM is absent.
+- Added no campaign-map polling or recurring scans; the compatibility work runs only on the existing trait-registration path.
+
 ## 1.7.41
 
 - Fixed TOR magic items with separately rolled loot modifiers, including Warden's Spear of the Wild Hunt, missing the purple magic-item background while unequipped.
